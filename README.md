@@ -190,11 +190,3 @@ python app.py
 ###
 5.12 chunks every second
 23.5 characters every second
-
-### Decoding audio multiple times
-t = STT_MIN_PARTIAL_SECONDS
-while t < audio_seconds:
-    window = audio[: int(t * SAMPLE_RATE)]
-    partial = partial_decode(stt, window)
-    ...
-    t += STT_PARTIAL_INTERVAL
