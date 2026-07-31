@@ -1,0 +1,12 @@
+ollama
+faster-whisper
+supertonic
+numpy
+sounddevice
+soundfile
+opencv-python
+pillow
+num2words
+langfuse==4.14.2
+python-dotenv
+psutil
