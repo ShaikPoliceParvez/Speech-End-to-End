@@ -187,6 +187,4 @@ python app.py
 
 
 
-###
-5.12 chunks every second
-23.5 characters every second
+
