@@ -12,20 +12,27 @@ Local-first multimodal voice assistant built in Python.
 - **Streaming Pipeline**: Real-time processing at every stage
 - **Intelligent Routing**: Vision, OCR, or Chat mode based on intent
 
-## Core Stack
+## Models And Configuration
 
-- STT: Faster Whisper Base (`cpu`, `int8` by default)
-- LLM: Ollama Gemma 3:4B
-- Vision: Gemma 3 Vision via Ollama image input
-- TTS: SuperTonic
-- Camera: OpenCV
+The active defaults in `config.py` are:
 
-## Default Audio + Whisper Config
+| Component | Current setting | Available configuration options |
+| --- | --- | --- |
+| STT engine | Faster Whisper (`STT_MODEL = "whisper"`) | `whisper` is the implemented engine. `parakeet` is reserved as a configuration option but is not yet selected by `stt.py`. |
+| Whisper model | `base` on `cpu` with `int8` compute | Model sizes: `tiny`, `base`, `small`, `medium`, `large`. Set `WHISPER_SIZE`, `WHISPER_DEVICE`, and `WHISPER_COMPUTE`. |
+| LLM | Ollama `qwen2.5:1.5b` | Set `LLM_MODEL`. The configured alternatives are `gemma3:4b` and `gemma2:2b-instruct-q2_K`; install the selected model with Ollama first. |
+| TTS | SuperTonic voice `M1` | Set `VOICE` to `M1`, `M2`, `F1`, `F2`, `F3`, `F4`, `F5`, or `F6`. |
+| Camera | OpenCV camera `0` | Set `CAMERA_INDEX`; use `CAPTURE_SAVE_IMAGES` and `CAPTURE_MAX_FILES` to control saved captures. |
 
-- `SAMPLE_RATE = 16000`
-- `WHISPER_SIZE = "base"`
-- `WHISPER_DEVICE = "cpu"`
-- `WHISPER_COMPUTE = "int8"`
+Other useful options in `config.py`:
+
+- **LLM output:** `LLM_MAX_TOKENS` is `1024`.
+- **Languages:** English (`en`) and Hindi (`hi`) are enabled. Set `DEFAULT_LANGUAGE` or `USER_PREFERRED_LANGUAGE`; uncomment additional entries in `SUPPORTED_LANGUAGES` only after confirming STT and TTS support.
+- **Audio and TTS:** `SAMPLE_RATE = 16000`, `TTS_SPEED = 0.92`, plus sentence-buffer and prefetch limits (`TTS_MIN_CHARS`, `TTS_MAX_CHARS`, `TTS_MIN_WORDS`, `TTS_MAX_WORDS`, `TTS_PREFETCH_TEXT`, `TTS_PREFETCH_AUDIO`).
+- **VAD:** Tune `VAD_SILENCE_THRESHOLD`, `VAD_SILENCE_DURATION`, `VAD_MIN_SPEECH_DURATION`, `VAD_GRACE_PERIOD`, and `VAD_MAX_RECORD_SECONDS`.
+- **STT decoding:** Tune `WHISPER_BEAM_SIZE`, fallback temperatures, quality thresholds, and partial-transcript timing (`STT_MIN_PARTIAL_SECONDS`, `STT_PARTIAL_INTERVAL`, `STT_ROLLING_SECONDS`, `STT_OVERLAP_SECONDS`).
+- **Conversation behavior:** `MAX_HISTORY` controls retained turns; `ROUTER_CONFIDENCE_THRESHOLD` controls when the router asks for clarification.
+- **Runtime switches:** `ENABLE_LIVE_TRANSCRIPT`, `ENABLE_PARTIAL_TRANSCRIPTS`, `MAX_PARTIAL_UPDATES_PER_SECOND`, and `DEBUG` control console behavior and diagnostic output.
 
 ## Installation
 
