@@ -6,8 +6,8 @@ arriving token by token) and each sentence is synthesized and streamed to
 your speakers. A warm-up pass loads the voice model first.
 
 Accuracy focus:
-  - Language is detected per sentence (so mixed English/Hindi text is spoken
-    with the right voice/number expansion for each part).
+    - Language is detected per sentence (so English, Hindi, and Telugu text is
+        sent to the appropriate backend).
   - The existing Speaker text preparation (number expansion, pronunciation
     map) is used unchanged.
 
@@ -22,7 +22,8 @@ import re
 import time
 import threading
 
-from tts import Speaker
+from language import detect_dominant_language
+from tts_router import TTSRouter
 
 
 class _EventTimer:
@@ -68,15 +69,18 @@ def _split_sentences(text):
 
 
 def _guess_language(text):
-    # Devanagari present -> treat as Hindi, else English.
-    return "hi" if any("\u0900" <= c <= "\u097f" for c in text) else "en"
+    return detect_dominant_language(text)
 
 
 def warm_up(speaker):
     """Synthesize a short phrase so the voice model is resident."""
     t0 = time.perf_counter()
     try:
-        speaker.tts.synthesize(text="ready", voice_style=speaker.style, lang="en")
+        speaker.supertonic.tts.synthesize(
+            text="ready",
+            voice_style=speaker.supertonic.style,
+            lang="en",
+        )
     except Exception as e:
         print(f"(warm-up skipped: {e})")
         return
@@ -101,7 +105,7 @@ def run():
     print("=== TTS BENCHMARK (accurate, streamed input) ===")
 
     load_start = time.perf_counter()
-    speaker = Speaker(on_event=None)
+    speaker = TTSRouter(on_event=None)
     print(f"Model load: {time.perf_counter() - load_start:.2f}s")
 
     warm_up(speaker)
@@ -119,7 +123,7 @@ def run():
         sentences = _split_sentences(text)
 
         timer = _EventTimer()
-        speaker.on_event = timer.on_event
+        speaker.set_event_handler(timer.on_event)
         speaker.start_turn()
 
         print(f"\n--- Streaming audio ({len(sentences)} sentence(s)) ---")

@@ -1,7 +1,7 @@
 # ========= MODELS =========
 
 STT_MODEL = "whisper"      # whisper | parakeet
-LLM_MODEL = "qwen2.5:1.5b" # gemma3:4b, qwen2.5:1.5b, gemma2:2b-instruct-q2_K is also available.
+LLM_MODEL = "gemma3:4b" # gemma3:4b, qwen2.5:1.5b, gemma2:2b-instruct-q2_K is also available.
 VOICE = "M1" 				 # M1 | M2 | F1 | F2 | F3 | F4 | F5 | F6
 
 # ========= LLM RESPONSE LENGTH =========
@@ -18,7 +18,7 @@ LLM_MAX_TOKENS = 1024
 SUPPORTED_LANGUAGES = {
 	"en": "English",
 	"hi": "Hindi",
-	# "te": "Telugu",
+	"te": "Telugu",
 	# "ta": "Tamil",
 	# "kn": "Kannada",
 	# "ml": "Malayalam",
@@ -27,6 +27,10 @@ SUPPORTED_LANGUAGES = {
 
 DEFAULT_LANGUAGE = "en"
 USER_PREFERRED_LANGUAGE = None
+
+# Whisper's language ID is accepted directly only at this confidence when it
+# agrees with the transcript's script and Roman-language evidence.
+WHISPER_LANGUAGE_CONFIDENCE_HIGH = 0.80
 
 # Words commonly mixed in speech that should not decide dominant language.
 TECHNICAL_BORROWED_WORDS = {
@@ -42,13 +46,51 @@ HINDI_ROMAN_CORE_WORDS = {
 	"tum", "kaise", "kese", "kya", "hai", "hain", "ho", "kal", "naam",
 	"kitne", "baje", "chal", "raha", "rahe", "batao", "sunao", "dekh",
 	"jara", "zara", "kholo", "ek", "mein",
-	"ab", "hindi", "baat", "karo", "milte",
+	"ab", "hindi", "baat", "karo", "milte", "bahut", "bohot", "ache", "acche",
+	"acha", "achha", "accha", "badiya", "shukriya", "dhanyavad", "dhanyavaad",
+	"bas", "bass", "hogaya", "hogayi", "hua", "hui", "nahi", "nahin", "haan",
+	"han", "kyun", "kyu", "phir", "fir", "aur", "bhi",
+}
+
+# Roman-Telugu core words used to identify Telugu written in Latin script.
+TELUGU_ROMAN_CORE_WORDS = {
+	"nenu", "nuvvu", "meeru", "mee", "ni", "nee", "naaku", "naku", "mana", "maaku",
+	"ela", "enti", "em", "undi", "unnaru", "unnavu", "unnava", "unnanu",
+	"cheppu", "cheppandi", "chey", "cheyyi", "choodu", "choosi", "kanipistundi", "kavali", "avunu", "kaadu",
+	"ledu", "namaskaram", "dhanyavadalu", "peru", "pairu", "evaru", "eppudu", "enduku", "katha", "vinali", "inko",
+	"ekkada", "ikkada", "akkada", "telugu", "lo", "matladu", "matladandi", "idi", "chaduvu", "rasundi",
+}
+
+# Clear English vocabulary prevents brief English turns such as "wow" or
+# "thanks" from inheriting the prior conversation language.
+ENGLISH_CORE_WORDS = {
+	"hello", "hi", "thanks", "thank", "you", "wow", "nice", "good", "awesome",
+	"fantastic", "tell", "me", "another", "story", "morning", "please",
+}
+
+# Only these short acknowledgements may inherit the previous conversation
+# language. Every other clear Latin-script message is treated as English unless
+# it matches the Roman Hindi or Telugu word banks above.
+AMBIGUOUS_LANGUAGE_TOKENS = {
+	"ok", "okay", "hmm", "hm", "mm", "yes", "yeah", "yep", "no", "nope",
+}
+
+# Explicit language requests override the language used to ask them. Add a
+# target alias here when supporting a new language or common STT misspelling.
+LANGUAGE_SWITCH_TARGETS = {
+	"en": {"english"},
+	"hi": {"hindi", "hindhi"},
+	"te": {"telugu", "telagum", "telugum"},
+}
+LANGUAGE_SWITCH_ACTION_TOKENS = {
+	"speak", "talk", "switch", "language", "baat", "bolo", "bol", "mein", "me", "matladu",
 }
 
 # Common Roman-Hindi words to normalize into Devanagari before LLM.
 HINGLISH_TOKEN_MAP = {
 	"aap": "आप",
 	"ap": "आप",
+	"app": "आप",
 	"iss": "इस",
 	"is": "इस",
 	"me": "में",
@@ -82,6 +124,33 @@ HINGLISH_TOKEN_MAP = {
 	"chal": "चल",
 	"kal": "कल",
 	"milte": "मिलते",
+	"bahut": "बहुत",
+	"bohot": "बहुत",
+	"ache": "अच्छे",
+	"acche": "अच्छे",
+	"acha": "अच्छा",
+	"achha": "अच्छा",
+	"accha": "अच्छा",
+	"badiya": "बढ़िया",
+	"shukriya": "शुक्रिया",
+	"dhanyavad": "धन्यवाद",
+	"dhanyavaad": "धन्यवाद",
+	"bas": "बस",
+	"bass": "बस",
+	"hogaya": "हो गया",
+	"hogayi": "हो गई",
+	"hua": "हुआ",
+	"hui": "हुई",
+	"nahi": "नहीं",
+	"nahin": "नहीं",
+	"haan": "हाँ",
+	"han": "हाँ",
+	"kyun": "क्यों",
+	"kyu": "क्यों",
+	"phir": "फिर",
+	"fir": "फिर",
+	"aur": "और",
+	"bhi": "भी",
 	"kitne": "कितने",
 	"baje": "बजे",
 	"internet": "इंटरनेट",
@@ -119,13 +188,13 @@ HINGLISH_PHRASE_MAP = {
 
 # "small" is the realistic minimum for usable Hindi accuracy. The multilingual
 # "base" model is notably weak on Devanagari; "small" runs fine on cpu/int8.
-WHISPER_SIZE = "base" #tiny | base | small | medium | large
+WHISPER_SIZE = "small" #tiny | base | small | medium | large
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE = "int8"
 
 # Beam search improves accuracy for non-English speech. Greedy (beam_size=1) is
 # used for fast partials; the final transcript uses a wider beam.
-WHISPER_BEAM_SIZE = 1
+WHISPER_BEAM_SIZE = 5
 
 # Temperature fallback: if a decode is low-confidence / repetitive, Whisper
 # retries at higher temperatures instead of emitting garbage.
@@ -138,7 +207,14 @@ WHISPER_NO_SPEECH_THRESHOLD = 0.6
 
 # Devanagari initial prompt biases the decoder toward correct Hindi script
 # instead of romanising or dropping words. Applied only when language == "hi".
-WHISPER_HINDI_PROMPT = "यह एक हिंदी बातचीत है। कृपया इसे देवनागरी लिपि में लिखें।"
+# AFTER
+WHISPER_HINDI_PROMPT = "हिंदी, देवनागरी"
+WHISPER_TELUGU_PROMPT = "తెలుగు, తెలుగు లిపి"
+
+
+# Tarz accepts speech only in these languages. Whisper initially auto-detects
+# the language, then retries unsupported detections using the default language.
+STT_ALLOWED_LANGUAGES = ("en", "hi", "te")
 
 # Pseudo-streaming configuration
 # First partial after 2.0s — ensures Whisper has real speech, not leading silence
@@ -162,8 +238,22 @@ TTS_MIN_CHARS = 72
 TTS_MIN_WORDS = 12
 TTS_MAX_CHARS = 220
 TTS_MAX_WORDS = 36
+# Send the first completed LLM sentence to TTS immediately. Later sentences
+# still use the normal buffer to avoid choppy playback.
+TTS_FIRST_SENTENCE_IMMEDIATELY = True
 TTS_PREFETCH_TEXT = 2
 TTS_PREFETCH_AUDIO = 1
+
+# TTS routing is configured in one place. To add a language, add an entry
+# here; Piper languages also specify their downloaded model path.
+TTS_LANGUAGE_BACKENDS = {
+	"en": {"backend": "supertonic"},
+	"hi": {"backend": "supertonic"},
+	"te": {
+		"backend": "piper",
+		"model": "models/piper/te_IN-venkatesh-medium.onnx",
+	},
+}
 
 # ========= VOICE ACTIVITY DETECTION (VAD) =========
 

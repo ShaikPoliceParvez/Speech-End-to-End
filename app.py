@@ -1,9 +1,11 @@
 import config
+import msvcrt
+import threading
 from microphone import Microphone
 from stt import STT
 from router import Router
 from llm import LLM, sentence_stream
-from tts import Speaker
+from tts_router import TTSRouter
 from camera import Camera
 from language import detect_dominant_language, normalize_text, detect_script
 from tracing import LangfuseTracer
@@ -21,7 +23,7 @@ class Tarz:
         self.router = Router()
         self.camera = Camera()
         self.llm = LLM(model=config.LLM_MODEL, tracer=self.tracing)
-        self.tts = Speaker(on_event=self._on_event)
+        self.tts = TTSRouter(on_event=self._on_event)
         self.tracing.set_model_startup_metrics(
             stt=self.stt.model_startup_metrics,
             llm=self.llm.measure_model_startup(),
@@ -32,10 +34,35 @@ class Tarz:
         if config.DEBUG:
             print(f"[EVENT] {name}: {data}")
 
+    @staticmethod
+    def _return_to_menu_requested(text):
+        command = text.strip().lower().strip(".,!?;:。")
+        return command in {
+            "/menu", "0", "menu", "back", "go back", "back to menu",
+            "menu par jao", "menu par wapas jao", "मेनू पर जाओ", "मेनू पर वापस जाओ",
+            "మెనూకి వెళ్ళు", "మెనూకి వెళ్లు", "మెనూకు వెళ్ళు",
+        }
+
+    def _watch_for_barge_in(self, stop_event):
+        # Ignore Enter left in the console input buffer before speech begins.
+        while msvcrt.kbhit():
+            msvcrt.getwch()
+
+        while not stop_event.wait(0.05):
+            if not msvcrt.kbhit():
+                continue
+
+            key = msvcrt.getwch()
+            if self.tts.is_speaking() and key in ("\r", "\n"):
+                self.tts.stop()
+                print("\nTarz: (stopped - listening for your next question)")
+                return
+
     def process(
         self,
         text,
         stt_language_hint=None,
+        stt_language_confidence=None,
         turn=None,
         input_mode=None,
         request_start=None,
@@ -54,6 +81,7 @@ class Tarz:
                     self._process(
                         text,
                         stt_language_hint,
+                        stt_language_confidence,
                         root_turn,
                         input_mode,
                         request_start,
@@ -63,6 +91,7 @@ class Tarz:
             self._process(
                 text,
                 stt_language_hint,
+                stt_language_confidence,
                 turn,
                 input_mode,
                 request_start,
@@ -72,19 +101,24 @@ class Tarz:
         if owns_turn:
             self.tracing.flush()
 
-    def _process(self, text, stt_language_hint, turn, input_mode, request_start, pipeline_metrics):
+    def _process(self, text, stt_language_hint, stt_language_confidence, turn, input_mode, request_start, pipeline_metrics):
 
         print(f"\nYou: {text}")
 
         # ---- Language + script detection, Hinglish normalization ----
         with self.tracing.start_step(
             "Language",
-            input={"message": text, "stt_language_hint": stt_language_hint},
+            input={
+                "message": text,
+                "stt_language_hint": stt_language_hint,
+                "stt_language_confidence": stt_language_confidence,
+            },
         ) as classification:
             script = detect_script(text)
             language = detect_dominant_language(
                 text,
                 stt_hint=stt_language_hint,
+                stt_confidence=stt_language_confidence,
                 previous_language=self.llm.memory.get_language(),
             )
             normalized_text = normalize_text(text, language)
@@ -153,6 +187,16 @@ class Tarz:
         # ---- LLM streaming -> sentence buffering -> TTS streaming ----
         self.tts.start_turn()
         self.tts.set_language(language)
+        barge_in_stop = threading.Event()
+        barge_in_listener = None
+        if input_mode == "voice":
+            print("Press ENTER to interrupt Tarz and speak again.")
+            barge_in_listener = threading.Thread(
+                target=self._watch_for_barge_in,
+                args=(barge_in_stop,),
+                daemon=True,
+            )
+            barge_in_listener.start()
 
         token_stream = self.llm.stream(
             prompt=normalized_text,
@@ -167,6 +211,8 @@ class Tarz:
             min_words=config.TTS_MIN_WORDS,
             max_chars=config.TTS_MAX_CHARS,
             max_words=config.TTS_MAX_WORDS,
+            first_sentence_immediately=config.TTS_FIRST_SENTENCE_IMMEDIATELY,
+            should_stop=self.tts.is_interrupted,
         )
 
         full_response = []
@@ -180,15 +226,20 @@ class Tarz:
         tts = self.tracing.start_manual_step(
             turn,
             "TTS",
-            metadata={"language": language, "engine": "supertonic", "voice": config.VOICE},
+            metadata={"language": language, "engine": self.tts.backend_name, "voice": config.VOICE},
         )
         playback = self.tracing.start_manual_step(
             turn,
             "Playback",
             metadata={"engine": "sounddevice"},
         )
-        self.tts.speak_stream(relay(sentences))
-        self.tts.wait_until_idle()
+        try:
+            self.tts.speak_stream(relay(sentences))
+            self.tts.wait_until_idle()
+        finally:
+            barge_in_stop.set()
+            if barge_in_listener is not None:
+                barge_in_listener.join(timeout=0.1)
         tts_metrics = self.tts.get_turn_metrics()
         self.tracing.update_step(
             tts,
@@ -241,6 +292,8 @@ class Tarz:
 
     def run_voice(self):
 
+        print("Say 'back to menu' to choose a different mode.")
+
         while True:
 
             request_start = self.tracing.now()
@@ -285,9 +338,16 @@ class Tarz:
                             },
                         )
 
+                    if self._return_to_menu_requested(result["text"]):
+                        print("Returning to mode selection...")
+                        self.tracing.record_event(turn, "Conversation Ended", {"returned_to_menu": True})
+                        self.tracing.flush()
+                        return
+
                     self.process(
                         result["text"],
                         stt_language_hint=result["language"],
+                        stt_language_confidence=result["confidence"],
                         turn=turn,
                         input_mode="voice",
                         request_start=request_start,
@@ -310,7 +370,11 @@ class Tarz:
 
         while True:
 
-            text = input("\nYou: ")
+            text = input("\nYou (/menu to change mode): ")
+
+            if self._return_to_menu_requested(text):
+                print("Returning to mode selection...")
+                return
 
             self.process(text)
 
@@ -319,16 +383,22 @@ if __name__ == "__main__":
 
     tarz = Tarz()
 
-    mode = input(
-        "\nChoose mode\n"
-        "1. Voice\n"
-        "2. Text\n\n"
-        "Choice: "
-    ).strip()
+    while True:
+        mode = input(
+            "\nChoose mode\n"
+            "1. Voice\n"
+            "2. Text\n"
+            "0. Exit\n\n"
+            "Choice: "
+        ).strip()
 
-    if mode == "1":
-        tarz.run_voice()
-    else:
-        tarz.run_text()
+        if mode == "1":
+            tarz.run_voice()
+        elif mode == "2":
+            tarz.run_text()
+        elif mode == "0":
+            break
+        else:
+            print("Please choose 1, 2, or 0.")
 
 

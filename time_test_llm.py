@@ -44,6 +44,13 @@ def _system_instruction(language):
             "Always respond ONLY in proper Hindi using Devanagari script. "
             "Keep answers direct and to the point."
         )
+    if language == "te":
+        return (
+            "The user's conversation language is Telugu. "
+            "The user may write Telugu in Roman script (Telglish) or Telugu script. "
+            "Always respond ONLY in grammatical Telugu using Telugu script. "
+            "Keep answers direct and to the point."
+        )
     return (
         f"Current conversation language is {name}. "
         f"Always answer ONLY in {name}. Keep answers direct and to the point."

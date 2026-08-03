@@ -5,8 +5,8 @@ Local-first multimodal voice assistant built in Python.
 ## Features
 
 - **Voice Activity Detection (VAD)**: Automatic endpoint detection - no need to press ENTER
-- **Speech-to-Text**: Faster Whisper transcription after voice capture
-- **Multilingual Support**: English, Hindi, and Hinglish (Roman Hindi)
+- **Speech-to-Text**: Faster Whisper transcription with confidence-based verification for unreliable language detection
+- **Multilingual Support**: English, Hindi/Hinglish, and Telugu/Telglish
 - **Automatic Language Detection**: Detects language and script in real-time
 - **Multi-modal Input**: Voice, text, and camera input support
 - **Streaming Pipeline**: Real-time processing at every stage
@@ -19,18 +19,19 @@ The active defaults in `config.py` are:
 | Component | Current setting | Available configuration options |
 | --- | --- | --- |
 | STT engine | Faster Whisper (`STT_MODEL = "whisper"`) | `whisper` is the implemented engine. `parakeet` is reserved as a configuration option but is not yet selected by `stt.py`. |
-| Whisper model | `base` on `cpu` with `int8` compute | Model sizes: `tiny`, `base`, `small`, `medium`, `large`. Set `WHISPER_SIZE`, `WHISPER_DEVICE`, and `WHISPER_COMPUTE`. |
-| LLM | Ollama `qwen2.5:1.5b` | Set `LLM_MODEL`. The configured alternatives are `gemma3:4b` and `gemma2:2b-instruct-q2_K`; install the selected model with Ollama first. |
-| TTS | SuperTonic voice `M1` | Set `VOICE` to `M1`, `M2`, `F1`, `F2`, `F3`, `F4`, `F5`, or `F6`. |
+| Whisper model | `small` on `cpu` with `int8` compute | Model sizes: `tiny`, `base`, `small`, `medium`, `large`. Set `WHISPER_SIZE`, `WHISPER_DEVICE`, and `WHISPER_COMPUTE`. |
+| LLM | Ollama `gemma3:4b` | Set `LLM_MODEL`. Install the selected model with Ollama first. |
+| TTS | SuperTonic `M1` for English/Hindi; Piper Venkatesh for Telugu | Configure `TTS_LANGUAGE_BACKENDS` to select a backend and model per language. |
 | Camera | OpenCV camera `0` | Set `CAMERA_INDEX`; use `CAPTURE_SAVE_IMAGES` and `CAPTURE_MAX_FILES` to control saved captures. |
 
 Other useful options in `config.py`:
 
 - **LLM output:** `LLM_MAX_TOKENS` is `1024`.
-- **Languages:** English (`en`) and Hindi (`hi`) are enabled. Set `DEFAULT_LANGUAGE` or `USER_PREFERRED_LANGUAGE`; uncomment additional entries in `SUPPORTED_LANGUAGES` only after confirming STT and TTS support.
-- **Audio and TTS:** `SAMPLE_RATE = 16000`, `TTS_SPEED = 0.92`, plus sentence-buffer and prefetch limits (`TTS_MIN_CHARS`, `TTS_MAX_CHARS`, `TTS_MIN_WORDS`, `TTS_MAX_WORDS`, `TTS_PREFETCH_TEXT`, `TTS_PREFETCH_AUDIO`).
-- **VAD:** Tune `VAD_SILENCE_THRESHOLD`, `VAD_SILENCE_DURATION`, `VAD_MIN_SPEECH_DURATION`, `VAD_GRACE_PERIOD`, and `VAD_MAX_RECORD_SECONDS`.
-- **STT decoding:** Tune `WHISPER_BEAM_SIZE`, fallback temperatures, quality thresholds, and partial-transcript timing (`STT_MIN_PARTIAL_SECONDS`, `STT_PARTIAL_INTERVAL`, `STT_ROLLING_SECONDS`, `STT_OVERLAP_SECONDS`).
+- **Languages:** English (`en`), Hindi (`hi`), and Telugu (`te`) are enabled. Set `DEFAULT_LANGUAGE` or `USER_PREFERRED_LANGUAGE`.
+- **Audio and TTS:** `SAMPLE_RATE = 16000`, `TTS_SPEED = 0.92`, first-sentence streaming enabled, plus sentence-buffer and prefetch limits (`TTS_MIN_CHARS`, `TTS_MAX_CHARS`, `TTS_MIN_WORDS`, `TTS_MAX_WORDS`, `TTS_PREFETCH_TEXT`, `TTS_PREFETCH_AUDIO`). Add name pronunciations through `TTS_PRONUNCIATION_MAP`.
+- **VAD:** Active endpoint settings are `VAD_SILENCE_THRESHOLD = 0.01`, `VAD_SILENCE_DURATION = 0.8`, `VAD_MIN_SPEECH_DURATION = 0.3`, `VAD_GRACE_PERIOD = 0.2`, and `VAD_MAX_RECORD_SECONDS = 30.0`.
+- **STT decoding:** Tune `WHISPER_BEAM_SIZE = 5`, `WHISPER_LANGUAGE_CONFIDENCE_HIGH = 0.80`, fallback temperatures, quality thresholds, Hindi/Telugu decode prompts, and partial-transcript timing (`STT_MIN_PARTIAL_SECONDS`, `STT_PARTIAL_INTERVAL`, `STT_ROLLING_SECONDS`, `STT_OVERLAP_SECONDS`).
+- **Camera:** `CAMERA_INDEX = 0`, saved captures are enabled, and `CAPTURE_MAX_FILES = 20` limits retained images.
 - **Conversation behavior:** `MAX_HISTORY` controls retained turns; `ROUTER_CONFIDENCE_THRESHOLD` controls when the router asks for clarification.
 - **Runtime switches:** `ENABLE_LIVE_TRANSCRIPT`, `ENABLE_PARTIAL_TRANSCRIPTS`, `MAX_PARTIAL_UPDATES_PER_SECOND`, and `DEBUG` control console behavior and diagnostic output.
 
@@ -108,9 +109,12 @@ flowchart TD
        subgraph Trace[One Langfuse chat-turn trace per interaction]
               A{Input mode}
               A -->|Voice| VAD[VAD: microphone to endpoint]
-              VAD --> STT[STT: first segment and final transcript]
+              VAD --> STT[STT: auto decode]
+              STT --> VERIFY{STT confidence and transcript checks pass?}
+              VERIFY -->|Yes: one decode| LANG[Language and script resolution]
+              VERIFY -->|No: supported-language verification| RETRY[Retry en, hi, te and rank decoded candidates]
+              RETRY --> LANG
               A -->|Text| TXT[Typed message]
-              STT --> LANG[Language and script]
               TXT --> LANG
               LANG --> ROUTER[Router: intent and confidence]
               ROUTER --> MEM[Memory: conversation history]
@@ -130,21 +134,37 @@ flowchart TD
 
 ## Multilingual Behavior
 
-- Detects conversation language (currently `en`, `hi`) and keeps responses in that language.
+- Detects conversation language (currently `en`, `hi`, `te`) and keeps responses in that language.
 - Hindi in Devanagari stays Hindi end-to-end.
 - Roman Hindi (Hinglish) is normalized to Devanagari before LLM.
+- Telugu script and Roman Telugu (Telglish) are handled as Telugu; Telglish replies use Telugu script.
 - No translation unless explicitly requested by the user.
 
-## Majority Language Policy
+### STT Language Verification
+
+Voice input starts with one Faster Whisper auto-detect decode. This is the normal,
+low-latency path. The result is accepted when the detected language is supported,
+the language probability meets `WHISPER_LANGUAGE_CONFIDENCE_HIGH`, and the
+transcript is clean and compatible with its detected script/language.
+
+Only unreliable results are decoded again with forced `en`, `hi`, and `te`.
+Candidates are ranked using language probability, native-script compatibility,
+Roman English/Hindi/Telugu vocabulary, segment log probability, compression ratio,
+and basic transcript-quality checks. The assistant returns one of Whisper's actual
+transcripts; this verification never generates or rewrites user speech.
+
+Retries are triggered by low confidence, an unsupported language, Arabic/Persian
+script, a script-language mismatch, or empty/repeated-token output. This avoids
+three decodes on normal requests.
+
+## Language Resolution Policy
 
 - Language and script are treated separately.
-- Dominant conversation language is decided by majority of meaningful tokens.
-- Detection excludes punctuation, numbers, named entities, and common technical mixed words.
-- Tie-breaking order:
-       - Previous conversation language
-       - STT language hint
-       - User preference (`USER_PREFERRED_LANGUAGE`)
-       - Default (`en`)
+- Native Telugu and Devanagari scripts decide Telugu and Hindi respectively.
+- Latin transcripts are scored using Roman Telugu, Roman Hindi, and clear English vocabularies; technical borrowed words do not influence the score.
+- A supported, high-confidence Whisper result is used when transcript evidence is not decisive.
+- Clear Latin input defaults to English, preventing prior language from becoming sticky.
+- Previous conversation language is used only for ambiguous acknowledgements such as `ok` or `hmm`; user preference and then `en` are final fallbacks.
 - Explicit user language switch commands override all heuristics.
 
 ### Example
@@ -174,7 +194,7 @@ flowchart TD
 
 ### Number Normalization
 
-- Numbers are spoken in active conversation language (`en`, `hi`, and future configured languages).
+- Numbers are spoken in active conversation language (`en`, `hi`, `te`, and future configured languages).
 - If `num2words` is unavailable, text falls back safely without number expansion.
 
 ## Camera Capture Retention
@@ -195,3 +215,10 @@ python app.py
 
 
 
+## Switch Modes
+
+The application stays open when switching modes, so loaded models are reused.
+
+- In text mode, enter `/menu` or `0` to return to the mode chooser.
+- In voice mode, say `back to menu` to return to the mode chooser.
+- At the chooser, select `1` for voice, `2` for text, or `0` to exit.

@@ -59,6 +59,8 @@ class Speaker:
         self._turn_metrics = {}
         self._stream = None
         self._stream_rate = None
+        self._interrupted = threading.Event()
+        self._speaking = threading.Event()
         self.num2words_lang_map = {
             "en": "en",
             "hi": "hi",
@@ -85,6 +87,8 @@ class Speaker:
 
     def start_turn(self):
         self.started = False
+        self._interrupted.clear()
+        self._speaking.clear()
         with self._metrics_lock:
             self._turn_metrics = {
                 "turn_start": time.perf_counter(),
@@ -124,6 +128,9 @@ class Speaker:
 
         for sentence in sentence_stream:
 
+            if self._interrupted.is_set():
+                break
+
             if sentence.strip():
                 if not self.started and self.on_event is not None:
                     self.on_event("TTS_STARTED", {})
@@ -142,8 +149,48 @@ class Speaker:
         return self.active_languages
 
     def wait_until_idle(self):
+        if self._interrupted.is_set():
+            return
         self.text_queue.join()
+        if self._interrupted.is_set():
+            return
         self.audio_queue.join()
+
+    def stop(self):
+        """Stop the active reply and discard audio that has not played yet."""
+        self._interrupted.set()
+        self._speaking.clear()
+
+    def is_interrupted(self):
+        return self._interrupted.is_set()
+
+    def is_speaking(self):
+        return self._speaking.is_set()
+
+    def begin_synthesis(self):
+        """Start timing synthesis for a backend that reuses this playback queue."""
+        with self._metrics_lock:
+            if self._turn_metrics.get("synthesis_start") is None:
+                self._turn_metrics["synthesis_start"] = time.perf_counter()
+
+    def enqueue_audio(self, audio, output_rate, sentence, language):
+        """Queue synthesized audio for the shared playback worker."""
+        if self._interrupted.is_set():
+            return
+
+        audio = np.asarray(audio, dtype=np.float32)
+        if audio.size == 0:
+            return
+
+        ready_at = time.perf_counter()
+        with self._metrics_lock:
+            if self._turn_metrics.get("first_audio_ready") is None:
+                self._turn_metrics["first_audio_ready"] = ready_at
+            self._turn_metrics["synthesis_end"] = ready_at
+            self._turn_metrics["audio_duration_ms"] += len(audio) / output_rate * 1000
+            self._turn_metrics["chunk_count"] += 1
+            self._turn_metrics["sample_rate"] = output_rate
+        self.audio_queue.put((audio, output_rate, sentence, language, ready_at))
 
     def _discover_engine_languages(self):
         discovered = {}
@@ -261,9 +308,9 @@ class Speaker:
             sentence, language = self.text_queue.get()
 
             try:
-                with self._metrics_lock:
-                    if self._turn_metrics.get("synthesis_start") is None:
-                        self._turn_metrics["synthesis_start"] = time.perf_counter()
+                if self._interrupted.is_set():
+                    continue
+                self.begin_synthesis()
                 tts_text = self._prepare_text(sentence, language)
 
                 if not tts_text:
@@ -284,16 +331,8 @@ class Speaker:
                 output_rate = int((sample_rate or 24000) * TTS_SPEED)
                 trimmed_audio = self._trim_silence(wav, output_rate)
 
-                if trimmed_audio.size:
-                    ready_at = time.perf_counter()
-                    with self._metrics_lock:
-                        if self._turn_metrics.get("first_audio_ready") is None:
-                            self._turn_metrics["first_audio_ready"] = ready_at
-                        self._turn_metrics["synthesis_end"] = ready_at
-                        self._turn_metrics["audio_duration_ms"] += len(trimmed_audio) / output_rate * 1000
-                        self._turn_metrics["chunk_count"] += 1
-                        self._turn_metrics["sample_rate"] = output_rate
-                    self.audio_queue.put((trimmed_audio, output_rate, sentence, language, ready_at))
+                if trimmed_audio.size and not self._interrupted.is_set():
+                    self.enqueue_audio(trimmed_audio, output_rate, sentence, language)
 
             except Exception as e:
                 if self.on_event is not None:
@@ -309,6 +348,8 @@ class Speaker:
             audio, output_rate, sentence, language, ready_at = self.audio_queue.get()
 
             try:
+                if self._interrupted.is_set():
+                    continue
                 playback_start = time.perf_counter()
                 with self._metrics_lock:
                     if self._turn_metrics.get("playback_start") is None:
@@ -333,7 +374,13 @@ class Speaker:
                     self._stream.start()
                     self._stream_rate = output_rate
 
-                self._stream.write(np.asarray(audio, dtype=np.float32).reshape(-1, 1))
+                audio = np.asarray(audio, dtype=np.float32).reshape(-1, 1)
+                block_size = max(1, int(output_rate * 0.05))
+                self._speaking.set()
+                for start in range(0, len(audio), block_size):
+                    if self._interrupted.is_set():
+                        break
+                    self._stream.write(audio[start:start + block_size])
 
                 with self._metrics_lock:
                     self._turn_metrics["playback_end"] = time.perf_counter()
@@ -347,4 +394,5 @@ class Speaker:
                 print(e)
 
             finally:
+                self._speaking.clear()
                 self.audio_queue.task_done()

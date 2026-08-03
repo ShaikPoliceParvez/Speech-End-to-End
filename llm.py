@@ -2,12 +2,45 @@ import ollama
 from contextlib import nullcontext
 from io import BytesIO
 from pathlib import Path
+import re
 import time
 
 from PIL import Image
 
 from memory import Memory
 from config import SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE, LLM_MODEL, LLM_MAX_TOKENS
+
+
+def _is_telugu_character(character):
+    return "\u0C00" <= character <= "\u0C7F"
+
+
+def _filter_telugu_token(token, parenthetical_depth):
+    """Remove non-Telugu translations while keeping streamed Telugu readable."""
+    filtered = []
+    for character in token:
+        if character in "([{":
+            parenthetical_depth += 1
+            continue
+        if character in ")]}":
+            parenthetical_depth = max(0, parenthetical_depth - 1)
+            continue
+        if parenthetical_depth:
+            continue
+        if (
+            _is_telugu_character(character)
+            or character.isspace()
+            or character.isdigit()
+            or character in ".,!?;:।…-–—"
+            or ord(character) >= 0x1F000
+        ):
+            filtered.append(character)
+
+    result = "".join(filtered)
+    result = re.sub(r"\s*[-–—]\s*", " ", result)
+    result = re.sub(r"\s+([.,!?;:।])", r"\1", result)
+    result = re.sub(r"([.,!?;:।])\s*(?=[.,!?;:।])", r"\1", result)
+    return result, parenthetical_depth
 
 
 class LLM:
@@ -81,6 +114,8 @@ class LLM:
         if vision_requested and not self.supports_vision():
             if lang == "hi":
                 assistant = "माफ़ कीजिए, वर्तमान मॉडल कैमरा या इमेज नहीं देख सकता।"
+            elif lang == "te":
+                assistant = "క్షమించండి, ప్రస్తుత మోడల్ కెమెరా లేదా చిత్రాలను చూడలేను."
             else:
                 assistant = "Sorry, the current model cannot see camera images."
 
@@ -119,6 +154,21 @@ class LLM:
                     "Never respond in Hinglish unless the user explicitly requests Hinglish. "
                     "Never translate unless the user explicitly asks for translation."
                 )
+        elif lang == "te":
+            system_instruction = (
+                "You are Tarz, a multilingual AI assistant.\n\n"
+                "The detected language is Telugu.\n\n"
+                "Rules:\n"
+                "- Reply only in Telugu.\n"
+                "- Use only Telugu Unicode script. Do not include English, Latin transliteration, "
+                "translations, or parenthetical explanations.\n"
+                "- If the user specifies a length (for example, 50 words or 100 words), follow it closely.\n"
+                "- Write natural, grammatically correct Telugu.\n"
+                "- You can communicate in Telugu. Never claim that you cannot speak or understand Telugu.\n"
+                "- Fulfill ordinary harmless requests, including fictional stories and jokes. "
+                "Do not say that you cannot tell a story.\n"
+                "- Be engaging and conversational."
+            )
         else:
             system_instruction = (
                 f"Current conversation language is {language_name}. "
@@ -167,6 +217,7 @@ class LLM:
         request_start = time.perf_counter()
         first_token_ms = None
         is_first_request = self._first_request
+        telugu_parenthetical_depth = 0
 
         generation = (
             self.tracer.start_generation(
@@ -190,7 +241,26 @@ class LLM:
 
             for chunk in response:
 
-                token = chunk["message"]["content"]
+                raw_token = chunk["message"]["content"]
+
+                if "prompt_eval_count" in chunk:
+                    usage_details["input_tokens"] = chunk["prompt_eval_count"]
+                if "eval_count" in chunk:
+                    usage_details["output_tokens"] = chunk["eval_count"]
+
+                token = raw_token
+                if lang == "te":
+                    token, telugu_parenthetical_depth = _filter_telugu_token(
+                        raw_token,
+                        telugu_parenthetical_depth,
+                    )
+                    if not token:
+                        continue
+                    if (
+                        not any(_is_telugu_character(character) or character.isdigit() for character in token)
+                        and not any(_is_telugu_character(character) for character in assistant)
+                    ):
+                        continue
 
                 assistant += token
 
@@ -216,12 +286,17 @@ class LLM:
                         "token": token,
                     })
 
-                if "prompt_eval_count" in chunk:
-                    usage_details["input_tokens"] = chunk["prompt_eval_count"]
-                if "eval_count" in chunk:
-                    usage_details["output_tokens"] = chunk["eval_count"]
-
                 yield token
+
+            if lang == "te" and not any(_is_telugu_character(character) for character in assistant):
+                assistant = "క్షమించండి, దయచేసి మీ ప్రశ్నను మళ్లీ అడగండి."
+                if first_token_ms is None:
+                    first_token_ms = round((time.perf_counter() - request_start) * 1000, 2)
+                if on_event is not None:
+                    on_event("LLM_FIRST_TOKEN", {"token": assistant})
+                    on_event("LLM_TOKEN", {"token": assistant, "text": assistant})
+                    on_event("LLM_STREAMING", {"token": assistant})
+                yield assistant
 
             total_latency_ms = round((time.perf_counter() - request_start) * 1000, 2)
             output_tokens = usage_details.get("output_tokens", 0)
@@ -264,15 +339,18 @@ def sentence_stream(
     min_words=12,
     max_chars=220,
     max_words=36,
+    first_sentence_immediately=False,
+    should_stop=None,
 ):
 
     buffer = ""
     pending = ""
+    has_emitted = False
 
-    endings = [".", "!", "?"]
+    endings = [".", "!", "?", "।"]
 
     def push_piece(piece):
-        nonlocal pending
+        nonlocal pending, has_emitted
         piece = piece.strip()
         if not piece:
             return None
@@ -285,19 +363,30 @@ def sentence_stream(
         chars = len(pending)
         words = len(pending.split())
 
+        if first_sentence_immediately and not has_emitted:
+            out = pending
+            pending = ""
+            has_emitted = True
+            return out
+
         if chars >= min_chars and words >= min_words:
             out = pending
             pending = ""
+            has_emitted = True
             return out
 
         if chars >= max_chars or words >= max_words:
             out = pending
             pending = ""
+            has_emitted = True
             return out
 
         return None
 
     for token in token_stream:
+
+        if should_stop is not None and should_stop():
+            return
 
         buffer += token
 

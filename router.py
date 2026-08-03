@@ -7,9 +7,11 @@ class Router:
         # Semantic phrase banks (multilingual), scored by intent groups.
         self.vision_action_phrases = [
             "what do you see", "look at this", "see this", "describe this image",
-            "describe this picture", "look around", "show me", "capture image",
+            "describe this picture", "look around", "capture image",
             "क्या दिख रहा है", "क्या देख रहे हो", "देखो", "जरा देखो", "ज़रा देखो",
+            "ఏం కనిపిస్తోంది", "ఇది చూడు", "చూసి చెప్పు", "కెమెరా తెరువు",
             "tum kya dekh rahe ho", "dekh ke bata", "jara dekh", "zara dekh",
+            "em kanipistundi", "idi choodu", "choosi cheppu", "camera teruvu",
             "photo dekho", "image batao", "picture describe karo", "camera kholo",
             "kya dikh raha hai", "kya dikh rha hai",
         ]
@@ -21,6 +23,8 @@ class Router:
             "invoice read karo", "receipt batao", "document padho", "paper me kya likha hai",
             "qr code padho", "barcode read karo", "aadhaar", "pan card", "passport", "cheque",
             "पत्र पढ़ो", "इस बिल में क्या लिखा है", "डॉक्यूमेंट पढ़ो", "रसीद पढ़ो",
+            "ఇది చదువు", "ఏమి రాసి ఉంది", "బిల్లు చదువు", "డాక్యుమెంట్ చదువు",
+            "idi chaduvu", "em rasundi", "bill chaduvu", "document chaduvu",
         ]
 
         self.system_phrases = [
@@ -31,17 +35,21 @@ class Router:
 
         self.vision_nouns = {
             "camera", "image", "photo", "picture", "scene", "surroundings", "तस्वीर", "फोटो",
+            "కెమెరా", "చిత్రం", "ఫోటో",
         }
         self.ocr_nouns = {
             "bill", "invoice", "receipt", "document", "prescription", "id", "paper", "form",
             "passport", "aadhaar", "pan", "cheque", "qr", "barcode", "newspaper", "letter",
             "बिल", "रसीद", "डॉक्यूमेंट", "कागज", "पत्र",
+            "బిల్లు", "డాక్యుమెంట్", "కాగితం",
         }
         self.read_verbs = {
             "read", "written", "text", "padho", "padhna", "likha", "लिखा", "पढ़ो",
+            "chaduvu", "rasundi", "చదువు", "రాసి",
         }
         self.see_verbs = {
             "see", "look", "describe", "show", "dekh", "dikha", "dikh", "दिख", "देख",
+            "choodu", "choosi", "kanipistundi", "చూడు", "చూసి", "కనిపిస్తోంది",
         }
         self.vision_context_tokens = {"kya", "raha", "rha", "hai", "है", "क्या", "रहा"}
 
@@ -51,7 +59,7 @@ class Router:
         return lowered
 
     def _tokens(self, text):
-        return re.findall(r"[a-zA-Z]+|[\u0900-\u097f]+", text)
+        return re.findall(r"[a-zA-Z]+|[\u0900-\u097f]+|[\u0c00-\u0c7f]+", text)
 
     def _phrase_hits(self, text, phrase_list):
         return sum(1 for p in phrase_list if p in text)
