@@ -3,7 +3,7 @@
 STT_MODEL = "whisper"      # whisper | parakeet
 LLM_MODEL = "qwen2.5:1.5b" # gemma3:4b, qwen2.5:1.5b, gemma2:2b-instruct-q2_K is also available.
 VOICE = "M1" 				 # M1 | M2 | F1 | F2 | F3 | F4 | F5 | F6
-
+#any OCR
 # ========= LLM RESPONSE LENGTH =========
 
 # Upper bound on generated tokens so long, detailed answers (stories,
