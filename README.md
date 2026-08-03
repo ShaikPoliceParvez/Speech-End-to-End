@@ -95,41 +95,21 @@ See [VAD_ENDPOINT_DETECTION.md](VAD_ENDPOINT_DETECTION.md) for detailed configur
 
 No heavy framework. The application records an utterance, transcribes it, then streams the response to TTS.
 
-## Runtime And Tracing Flow
+## Runtime Pipeline
 
 ```mermaid
 flowchart TD
-       subgraph Startup[Application Startup: model initialization timings]
-              S0[Start Tarz] --> S1[Whisper load]
-              S1 --> S2[Ollama model readiness]
-              S2 --> S3[SuperTonic and voice load]
-              S3 --> S4[Store model_startup metrics]
-       end
-
-       subgraph Trace[One Langfuse chat-turn trace per interaction]
-              A{Input mode}
-              A -->|Voice| VAD[VAD: microphone to endpoint]
-              VAD --> STT[STT: auto decode]
-              STT --> VERIFY{STT confidence and transcript checks pass?}
-              VERIFY -->|Yes: one decode| LANG[Language and script resolution]
-              VERIFY -->|No: supported-language verification| RETRY[Retry en, hi, te and rank decoded candidates]
-              RETRY --> LANG
-              A -->|Text| TXT[Typed message]
-              TXT --> LANG
-              LANG --> ROUTER[Router: intent and confidence]
-              ROUTER --> MEM[Memory: conversation history]
-              MEM --> INTENT{Vision or OCR?}
-              INTENT -->|Yes| CAM[Camera tool: capture and dimensions]
-              INTENT -->|No| LLM[LLM generation: TTFT, tokens/sec, completion]
-              CAM --> LLM
-              LLM --> BUFFER[Sentence buffer]
-              BUFFER --> TTS[TTS: first audio and synthesis]
-              TTS --> PLAY[Playback: queue delay and audio duration]
-              PLAY --> END[Conversation completed: total latency]
-       end
-
-       S4 --> A
-       LLM -. streams sentences while .-> TTS
+    INPUT{Voice or text input}
+    INPUT -->|Voice| VAD[Voice activity detection]
+    INPUT -->|Text| TEXT[Text message]
+    VAD --> STT[Speech to text]
+    STT --> LANGUAGE[Language detection]
+    TEXT --> LANGUAGE
+    LANGUAGE --> ROUTER[Intent router]
+    ROUTER --> ACTION{Chat, Vision, or OCR}
+    ACTION --> LLM[LLM response]
+    LLM --> TTS[Text to speech]
+    TTS --> OUTPUT[Playback]
 ```
 
 ## Multilingual Behavior
