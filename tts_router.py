@@ -36,7 +36,7 @@ class TTSRouter:
         route = TTS_LANGUAGE_BACKENDS.get(language)
         if route is None:
             raise ValueError(
-                "Unsupported language. Currently supported languages are English, Hindi, and Telugu."
+                "Unsupported language. Currently supported languages are English, Hindi, Telugu, Malayalam, and Arabic."
             )
         return language, route
 

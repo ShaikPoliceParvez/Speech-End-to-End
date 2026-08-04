@@ -14,6 +14,8 @@ from config import (
     WHISPER_NO_SPEECH_THRESHOLD,
     WHISPER_HINDI_PROMPT,
     WHISPER_TELUGU_PROMPT,
+    WHISPER_TAMIL_PROMPT,
+    WHISPER_ARABIC_PROMPT,
     WHISPER_LANGUAGE_CONFIDENCE_HIGH,
     STT_ALLOWED_LANGUAGES,
     DEFAULT_LANGUAGE,
@@ -49,6 +51,8 @@ class STT:
         initial_prompt = {
             "hi": WHISPER_HINDI_PROMPT,
             "te": WHISPER_TELUGU_PROMPT,
+            "ml": WHISPER_TAMIL_PROMPT,
+            "ar": WHISPER_ARABIC_PROMPT,
         }.get(language)
         return self.model.transcribe(
             audio,
@@ -102,6 +106,8 @@ class STT:
             "en": {"latin", "unknown", "mixed"},
             "hi": {"devanagari", "latin", "mixed", "unknown"},
             "te": {"telugu", "latin", "mixed", "unknown"},
+            "ml": {"malayalam", "latin", "mixed", "unknown"},
+            "ar": {"arabic", "mixed", "unknown"},
         }
         return script in expected_scripts.get(language, set())
 
@@ -281,16 +287,20 @@ class STT:
     def detect_script(text):
         has_dev = any("\u0900" <= c <= "\u097F" for c in text)
         has_telugu = any("\u0C00" <= c <= "\u0C7F" for c in text)
+        has_malayalam = any("\u0D00" <= c <= "\u0D7F" for c in text)
         has_arabic = any("\u0600" <= c <= "\u06FF" for c in text)
         has_lat = any(c.isascii() and c.isalpha() for c in text)
 
         # Multiple scripts are retained as "mixed" so verification does not
         # mistake an English borrowed word for a failed Telugu/Hindi transcript.
-        if sum((has_dev, has_telugu, has_arabic, has_lat)) > 1:
+        if sum((has_dev, has_telugu, has_malayalam, has_arabic, has_lat)) > 1:
             return "mixed"
 
         if has_telugu:
             return "telugu"
+
+        if has_malayalam:
+            return "malayalam"
 
         if has_dev:
             return "devanagari"

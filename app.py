@@ -189,14 +189,13 @@ class Tarz:
         self.tts.set_language(language)
         barge_in_stop = threading.Event()
         barge_in_listener = None
-        if input_mode == "voice":
-            print("Press ENTER to interrupt Tarz and speak again.")
-            barge_in_listener = threading.Thread(
-                target=self._watch_for_barge_in,
-                args=(barge_in_stop,),
-                daemon=True,
-            )
-            barge_in_listener.start()
+        print("Press ENTER to interrupt Tarz and ask your next question.")
+        barge_in_listener = threading.Thread(
+            target=self._watch_for_barge_in,
+            args=(barge_in_stop,),
+            daemon=True,
+        )
+        barge_in_listener.start()
 
         token_stream = self.llm.stream(
             prompt=normalized_text,

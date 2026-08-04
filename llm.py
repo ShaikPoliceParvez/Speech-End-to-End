@@ -151,6 +151,8 @@ class LLM:
                     "The user's conversation language is Hindi. "
                     "The user may type in Roman Hindi, but input is normalized before you receive it. "
                     "Always respond ONLY in proper Hindi using Devanagari script. "
+                    "Do NOT respond in Arabic, Urdu, Persian, or any other script under any circumstances. "
+                    "Even if the user's name sounds Arabic or Persian, respond exclusively in Hindi Devanagari. "
                     "Never respond in Hinglish unless the user explicitly requests Hinglish. "
                     "Never translate unless the user explicitly asks for translation."
                 )
@@ -162,11 +164,39 @@ class LLM:
                 "- Reply only in Telugu.\n"
                 "- Use only Telugu Unicode script. Do not include English, Latin transliteration, "
                 "translations, or parenthetical explanations.\n"
+                "- Understand common Roman Telugu vocabulary, including niku, neeku, telusa, "
+                "atanu, and chanipoyadu; reply in Telugu script.\n"
                 "- If the user specifies a length (for example, 50 words or 100 words), follow it closely.\n"
                 "- Write natural, grammatically correct Telugu.\n"
                 "- You can communicate in Telugu. Never claim that you cannot speak or understand Telugu.\n"
                 "- Fulfill ordinary harmless requests, including fictional stories and jokes. "
                 "Do not say that you cannot tell a story.\n"
+                "- Be engaging and conversational."
+            )
+        elif lang == "ml":
+            system_instruction = (
+                "You are Tarz, a multilingual AI assistant.\n\n"
+                "The detected language is Malayalam.\n\n"
+                "Rules:\n"
+                "- Reply ONLY in Malayalam using Malayalam Unicode script (കേരളം, not Kerala).\n"
+                "- Do not include English, Latin transliteration, Arabic, Hindi, or any other script.\n"
+                "- The user may write in Roman Malayalam (Manglish); always reply in proper Malayalam script.\n"
+                "- Write natural, grammatically correct Malayalam.\n"
+                "- You can communicate in Malayalam. Never claim otherwise.\n"
+                "- Fulfill ordinary harmless requests including stories and jokes.\n"
+                "- Be engaging and conversational."
+            )
+        elif lang == "ar":
+            system_instruction = (
+                "You are Tarz, a multilingual AI assistant.\n\n"
+                "The detected language is Arabic.\n\n"
+                "Rules:\n"
+                "- Reply ONLY in Arabic using Arabic Unicode script.\n"
+                "- Do not include English, Latin transliteration, or any other script.\n"
+                "- The user may write in Arabizi (Roman Arabic); always reply in proper Arabic script.\n"
+                "- Write natural, grammatically correct Modern Standard Arabic or the detected dialect.\n"
+                "- You can communicate in Arabic. Never claim otherwise.\n"
+                "- Fulfill ordinary harmless requests including stories and jokes.\n"
                 "- Be engaging and conversational."
             )
         else:
@@ -176,23 +206,33 @@ class LLM:
                 "Never translate unless the user explicitly asks for translation."
             )
 
-        # Adapt response length to the matter at hand: keep simple questions
-        # short, but give full, detailed answers when the topic needs depth
-        # (stories, explanations, how-to steps, comparisons).
+        # Keep simple answers concise, but let creative requests have enough
+        # room to feel complete rather than ending after an acknowledgement.
         system_instruction += (
-            " Match the length of your answer to what the question needs: "
-            "be concise for simple or factual questions, and give a thorough, "
-            "well-developed answer when the topic calls for detail, such as "
-            "stories, explanations, instructions, or comparisons. "
-            "You are an AI assistant model, you should listen to the user's input carefully and respond appropriately. "
-            "do not give lengthy responses, keep your responses short and concise. "
+            " Keep simple factual answers short, clear, and complete. "
+            "When the user requests a story, begin the story immediately instead of only confirming that you can tell one. "
+            "Write a complete short story with a beginning, development, and ending in several short paragraphs. "
+            "For numbered plans, use consecutive numbers exactly once and put "
+            "each item on its own line. For an N-day itinerary, provide Day 1 "
+            "through Day N without skipping or repeating days. Do not output a "
+            "number by itself, and do not invent uncertain place names. "
         )
 
         messages = [{
             "role": "system",
             "content": system_instruction,
         }]
-        messages.extend(self.memory.messages().copy())
+        history = self.memory.messages().copy()
+        current_message = history.pop()
+        messages.extend(history)
+        # Keep the active turn's language closest to the current request so
+        # previous Hindi or Telugu replies cannot pull a new English turn into
+        # the wrong output language.
+        messages.append({
+            "role": "system",
+            "content": f"FINAL LANGUAGE LOCK: Respond only in {language_name} for this user message.",
+        })
+        messages.append(current_message)
 
         # If vision is requested
         if image is not None:
@@ -346,14 +386,25 @@ def sentence_stream(
     buffer = ""
     pending = ""
     has_emitted = False
+    list_marker = ""
 
     endings = [".", "!", "?", "।"]
 
     def push_piece(piece):
-        nonlocal pending, has_emitted
+        nonlocal pending, has_emitted, list_marker
         piece = piece.strip()
         if not piece:
             return None
+
+        # Models sometimes stream a list number (for example, "1.") before
+        # its text. Keep it until the following sentence so TTS never speaks a
+        # bare number as a separate response.
+        if re.fullmatch(r"\d+[.)]", piece):
+            list_marker = piece
+            return None
+        if list_marker:
+            piece = f"{list_marker} {piece}"
+            list_marker = ""
 
         if pending:
             pending = f"{pending} {piece}".strip()
@@ -435,6 +486,9 @@ def sentence_stream(
                 on_event("SENTENCE_READY", {"sentence": out})
                 on_event("LLM_SENTENCE_READY", {"sentence": out})
             yield out
+
+    if list_marker:
+        pending = f"{pending} {list_marker}".strip()
 
     if pending.strip():
         sentence = pending.strip()

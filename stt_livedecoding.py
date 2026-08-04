@@ -34,6 +34,18 @@ from config import (
     WHISPER_LOG_PROB_THRESHOLD,
     WHISPER_NO_SPEECH_THRESHOLD,
     WHISPER_HINDI_PROMPT,
+    WHISPER_TELUGU_PROMPT,
+    WHISPER_TAMIL_PROMPT,
+    WHISPER_ARABIC_PROMPT,
+    WHISPER_HINDI_HOTWORDS,
+    WHISPER_TELUGU_HOTWORDS,
+    WHISPER_TAMIL_HOTWORDS,
+    WHISPER_ARABIC_HOTWORDS,
+    WHISPER_HINDI_PREFIX,
+    WHISPER_TELUGU_PREFIX,
+    WHISPER_TAMIL_PREFIX,
+    WHISPER_ARABIC_PREFIX,
+    STT_ALLOWED_LANGUAGES,
 )
 
 # If you want max speed over max accuracy, try beam_size=1 (greedy decoding)
@@ -65,6 +77,54 @@ def warm_up(stt):
     print(f"Warm-up           : {time.perf_counter()-t0:.2f}s")
 
 
+_GARBAGE_PATTERNS = {"???", "...", "[ Silence ]", "[BLANK_AUDIO]", "(inaudible)"}
+
+def _is_hallucination(text: str) -> bool:
+    """Catch repetition loops, known garbage tokens, and all-punctuation outputs."""
+    stripped = text.strip()
+    if not stripped:
+        return True
+    if stripped in _GARBAGE_PATTERNS:
+        return True
+    # all non-alphanumeric / non-script characters → garbage
+    if all(not c.isalpha() for c in stripped):
+        return True
+    if len(stripped) < 6:
+        return False
+    # repeated n-gram covers >60 % of the text
+    for n in (2, 3, 4):
+        chunk = stripped[:n]
+        repeated = chunk * (len(stripped) // n)
+        if stripped.startswith(repeated) and len(repeated) / len(stripped) > 0.6:
+            return True
+    return False
+
+
+_SCRIPT_RANGES = {
+    "hi": (0x0900, 0x097F),  # Devanagari
+    "te": (0x0C00, 0x0C7F),  # Telugu
+    "ml": (0x0D00, 0x0D7F),  # Malayalam
+    "ar": (0x0600, 0x06FF),  # Arabic
+}
+
+
+def _wrong_script(text: str, language: str) -> bool:
+    """True when the transcript contains no characters from the expected script."""
+    r = _SCRIPT_RANGES.get(language)
+    if r is None or not text:
+        return False
+    return not any(r[0] <= ord(c) <= r[1] for c in text)
+
+
+def _is_prompt_echo(text: str) -> bool:
+    """True when Whisper parrotted the initial prompt instead of transcribing audio."""
+    for prompt in (WHISPER_HINDI_PROMPT, WHISPER_TELUGU_PROMPT,
+                   WHISPER_TAMIL_PROMPT, WHISPER_ARABIC_PROMPT):
+        if prompt and any(word in text for word in prompt.split(",")):
+            return True
+    return False
+
+
 def live_decode(stt, audio, language=None, label="Pass"):
     """
     Streams segments as faster-whisper decodes them, printing each one
@@ -73,7 +133,21 @@ def live_decode(stt, audio, language=None, label="Pass"):
     Returns: (full_text, info, timings_dict)
     """
 
-    prompt = WHISPER_HINDI_PROMPT if language == "hi" else None
+    # prefix hard-forces the correct script; hotwords provide additional vocab bias.
+    hotwords = None
+    prefix = None
+    if language == "hi":
+        hotwords = WHISPER_HINDI_HOTWORDS
+        prefix = WHISPER_HINDI_PREFIX
+    elif language == "te":
+        hotwords = WHISPER_TELUGU_HOTWORDS
+        prefix = WHISPER_TELUGU_PREFIX
+    elif language == "ml":
+        hotwords = WHISPER_TAMIL_HOTWORDS
+        prefix = WHISPER_TAMIL_PREFIX
+    elif language == "ar":
+        hotwords = WHISPER_ARABIC_HOTWORDS
+        prefix = WHISPER_ARABIC_PREFIX
 
     decode_start = time.perf_counter()
 
@@ -85,7 +159,8 @@ def live_decode(stt, audio, language=None, label="Pass"):
         vad_filter=True,
         without_timestamps=True,
         condition_on_previous_text=False,
-        initial_prompt=prompt,
+        prefix=prefix,
+        hotwords=hotwords,
         temperature=WHISPER_TEMPERATURES,
         compression_ratio_threshold=WHISPER_COMPRESSION_RATIO_THRESHOLD,
         log_prob_threshold=WHISPER_LOG_PROB_THRESHOLD,
@@ -121,6 +196,10 @@ def live_decode(stt, audio, language=None, label="Pass"):
 
     total_decode_time = time.perf_counter() - decode_start
     text = "".join(chunks).strip()
+
+    # Remove the injected prefix so it doesn't bleed into the final transcript.
+    if prefix and text.startswith(prefix):
+        text = text[len(prefix):].strip()
 
     timings = {
         "ttfs": first_segment_time if first_segment_time is not None else total_decode_time,
@@ -173,8 +252,26 @@ def run():
 
         needs_hindi_redecode = (
             getattr(info, "language", None) == "hi"
-            and info.language_probability < HINDI_CONFIDENCE_REDECODE_THRESHOLD
+            and (info.language_probability < HINDI_CONFIDENCE_REDECODE_THRESHOLD
+                 or _wrong_script(text, "hi"))
         )
+        needs_telugu_redecode = (
+            getattr(info, "language", None) == "te"
+            and (info.language_probability < HINDI_CONFIDENCE_REDECODE_THRESHOLD
+                 or _wrong_script(text, "te"))
+        )
+        needs_tamil_redecode = (
+            getattr(info, "language", None) == "ml"
+            and (info.language_probability < HINDI_CONFIDENCE_REDECODE_THRESHOLD
+                 or _wrong_script(text, "ml"))
+        )
+        needs_arabic_redecode = (
+            getattr(info, "language", None) == "ar"
+            and (info.language_probability < HINDI_CONFIDENCE_REDECODE_THRESHOLD
+                 or _wrong_script(text, "ar"))
+        )
+        # Whisper guessed a language outside the allowed set (e.g. ja).
+        needs_fallback = getattr(info, "language", None) not in STT_ALLOWED_LANGUAGES
 
         if needs_hindi_redecode:
 
@@ -188,9 +285,106 @@ def run():
             second_pass = hi_timings["total_decode_time"]
             second_pass_ttfs = hi_timings["ttfs"]
 
-            if hi_text:
+            if (hi_text
+                    and not _is_hallucination(hi_text)
+                    and not _is_prompt_echo(hi_text)
+                    and not _wrong_script(hi_text, "hi")):
                 text = hi_text
                 info = hi_info
+            else:
+                print("  [Pass 2 rejected — keeping Pass 1 result]")
+
+        elif needs_telugu_redecode:
+
+            te_text, te_info, te_timings = live_decode(
+                stt,
+                audio,
+                language="te",
+                label="Pass 2 (Telugu re-decode)",
+            )
+
+            second_pass = te_timings["total_decode_time"]
+            second_pass_ttfs = te_timings["ttfs"]
+
+            if (te_text
+                    and not _is_hallucination(te_text)
+                    and not _is_prompt_echo(te_text)
+                    and not _wrong_script(te_text, "te")):
+                text = te_text
+                info = te_info
+            else:
+                print("  [Pass 2 rejected — keeping Pass 1 result]")
+
+        elif needs_tamil_redecode:
+
+            ta_text, ta_info, ta_timings = live_decode(
+                stt,
+                audio,
+                language="ml",
+                label="Pass 2 (Malayalam re-decode)",
+            )
+
+            second_pass = ta_timings["total_decode_time"]
+            second_pass_ttfs = ta_timings["ttfs"]
+
+            if (ta_text
+                    and not _is_hallucination(ta_text)
+                    and not _is_prompt_echo(ta_text)
+                    and not _wrong_script(ta_text, "ml")):
+                text = ta_text
+                info = ta_info
+            else:
+                print("  [Pass 2 rejected — keeping Pass 1 result]")
+
+        elif needs_arabic_redecode:
+
+            ar_text, ar_info, ar_timings = live_decode(
+                stt,
+                audio,
+                language="ar",
+                label="Pass 2 (Arabic re-decode)",
+            )
+
+            second_pass = ar_timings["total_decode_time"]
+            second_pass_ttfs = ar_timings["ttfs"]
+
+            if (ar_text
+                    and not _is_hallucination(ar_text)
+                    and not _is_prompt_echo(ar_text)
+                    and not _wrong_script(ar_text, "ar")):
+                text = ar_text
+                info = ar_info
+            else:
+                print("  [Pass 2 rejected — keeping Pass 1 result]")
+
+        elif needs_fallback:
+
+            print(f"  [Detected '{info.language}' — not in allowed set; trying hi/te/ta/ar fallback]")
+            best_text, best_info, best_timings = None, None, None
+
+            for lang in ("hi", "te", "ml", "ar"):
+                fb_text, fb_info, fb_timings = live_decode(
+                    stt, audio,
+                    language=lang,
+                    label=f"Fallback ({lang})",
+                )
+                second_pass += fb_timings["total_decode_time"]
+                if second_pass_ttfs == 0.0:
+                    second_pass_ttfs = fb_timings["ttfs"]
+
+                if (fb_text
+                        and not _is_hallucination(fb_text)
+                        and not _is_prompt_echo(fb_text)
+                        and not _wrong_script(fb_text, lang)):
+                    if (best_info is None
+                            or fb_info.language_probability > best_info.language_probability):
+                        best_text, best_info, best_timings = fb_text, fb_info, fb_timings
+
+            if best_text:
+                text = best_text
+                info = best_info
+            else:
+                print("  [All fallbacks rejected — keeping Pass 1 result]")
 
         decode_time = timings["total_decode_time"] + second_pass
 
@@ -205,8 +399,9 @@ def run():
         print(f"  segments in pass 1         : {len(timings['segment_times'])}")
 
         if second_pass:
-            print(f"Hindi 2nd pass TTFS               : {second_pass_ttfs:.2f}s")
-            print(f"Hindi 2nd pass decode time        : {second_pass:.2f}s")
+            lang_label = "Telugu" if needs_telugu_redecode else "Hindi"
+            print(f"{lang_label} 2nd pass TTFS               : {second_pass_ttfs:.2f}s")
+            print(f"{lang_label} 2nd pass decode time        : {second_pass:.2f}s")
 
         print(f"Total time to generate transcript     : {decode_time:.2f}s")
         print(f"Audio length                  : {audio_seconds:.2f}s")

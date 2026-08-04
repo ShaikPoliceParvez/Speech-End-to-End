@@ -1,6 +1,6 @@
 import unittest
 
-from language import detect_dominant_language, detect_script
+from language import detect_dominant_language, detect_script, normalize_text
 
 
 class LanguageDetectionTests(unittest.TestCase):
@@ -31,6 +31,22 @@ class LanguageDetectionTests(unittest.TestCase):
             detect_dominant_language("naku katha cheppu", stt_hint="en", stt_confidence=0.95),
             "te",
         )
+
+    def test_common_roman_hindi_trip_request(self):
+        text = "mereliye 5 days bombay trip plan karo"
+        self.assertEqual(detect_dominant_language(text), "hi")
+        self.assertEqual(normalize_text(text, "hi"), "मेरे लिए 5 days bombay trip plan करो")
+
+    def test_roman_hindi_majority_beats_shared_words(self):
+        self.assertEqual(detect_dominant_language("tumhe bahubali ka story patahe"), "hi")
+
+    def test_roman_telugu_vocabulary(self):
+        self.assertEqual(detect_dominant_language("atanu ela chanipoyadu"), "te")
+
+    def test_extended_roman_vocabulary(self):
+        self.assertEqual(detect_dominant_language("can you explain this"), "en")
+        self.assertEqual(detect_dominant_language("tum mujhe kya bataoge"), "hi")
+        self.assertEqual(detect_dominant_language("nuvvu naaku cheptava"), "te")
 
     def test_arabic_and_mixed_scripts_are_reported(self):
         self.assertEqual(detect_script("سلام"), "arabic")

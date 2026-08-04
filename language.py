@@ -25,6 +25,8 @@ from config import (
     USER_PREFERRED_LANGUAGE,
     HINDI_ROMAN_CORE_WORDS,
     TELUGU_ROMAN_CORE_WORDS,
+    MALAYALAM_ROMAN_CORE_WORDS,
+    ARABIC_ROMAN_CORE_WORDS,
     ENGLISH_CORE_WORDS,
     AMBIGUOUS_LANGUAGE_TOKENS,
     LANGUAGE_SWITCH_TARGETS,
@@ -35,22 +37,285 @@ from config import (
     WHISPER_LANGUAGE_CONFIDENCE_HIGH,
 )
 
-_WORD_RE = re.compile(r"[a-zA-Z]+|[\u0900-\u097f]+|[\u0c00-\u0c7f]+")
+_WORD_RE = re.compile(r"[a-zA-Z]+|[\u0900-\u097f]+|[\u0c00-\u0c7f]+|[\u0d00-\u0d7f]+|[\u0600-\u06ff]+")
 _LATIN_WORD_RE = re.compile(r"[a-zA-Z]+")
+
+# Common Roman vocabulary lives with the detector rather than in config. A
+# token may appear in more than one set; each language receives that token's
+# score and the majority of meaningful words decides the sentence language.
+_ROMAN_LANGUAGE_VOCABULARY = {
+    "en": ENGLISH_CORE_WORDS | {
+        "cinema", "movie", "film", "what", "where", "when", "why", "how", "is", "are",
+        "am", "was", "were", "do", "does", "did", "can", "could", "would", "will", "should",
+        "want", "know", "about", "with", "for", "from", "this", "that", "these", "those",
+        "i", "my", "we", "our", "he", "she", "they", "it", "help", "make", "give", "show",
+        "explain", "read", "write", "watch", "listen", "find", "today", "tomorrow", "yesterday",
+    },
+    "hi": HINDI_ROMAN_CORE_WORDS | {
+    # Pronouns
+    "mai", "main", "me", "mein", "maii",
+    "mujhe", "muje", "mujhko", "mjh", "mjhe",
+    "ham", "hum", "hme", "hume", "humko",
+    "aap", "ap", "aapko", "apko",
+    "tum", "tm", "tumhe", "tumko", "tujhe",
+    "tu", "tera", "teri", "tere",
+    "mera", "meri", "mere",
+    "hamara", "hamari", "hamare",
+    "apna", "apni", "apne",
+
+    # Question words
+    "kya", "kya?", "ky", "kaise", "kese", "kaisa",
+    "kab", "kahan", "kidhar", "kaun", "kon",
+    "kis", "kisko", "jisko", "isko", "usko",
+    "kitna", "kitni", "kitne", "kyun", "kyu",
+
+    # Common verbs
+    "hai", "h", "he", "hain",
+    "ho", "hu", "hun", "hoo",
+    "tha", "thi", "the",
+    "kar", "karo", "karna", "karni",
+    "karta", "karti", "karte",
+    "kiya", "kiye", "ki",
+    "bol", "bolo", "bolna",
+    "bata", "batao", "batana",
+    "sun", "suno", "sunao",
+    "dekh", "dekho", "dekhna",
+    "ja", "jao", "jana", "jaana",
+    "aa", "aao", "aana",
+    "aya", "aaya", "ayi", "aayi",
+    "gaya", "gyi", "gayi", "gye",
+    "chal", "chalo",
+    "mil", "milte", "milna",
+    "rakho", "rakhna",
+    "le", "lelo", "lena",
+    "de", "dedo", "dena",
+
+    # Common words
+    "ka", "ki", "ke",
+    "ko", "se", "par", "pe",
+    "liye", "keliye",
+    "aur", "or",
+    "lekin", "magar",
+    "agar", "to", "phir", "fir",
+    "kyunki", "isliye",
+
+    # Time
+    "ab", "abhi",
+    "aaj", "kal", "parso",
+    "baad", "pehle",
+    "subah", "shaam", "raat",
+
+    # Location
+    "yaha", "yahaan", "yahan",
+    "waha", "wahaan", "wahan",
+    "ghar", "bahar",
+
+    # State
+    "acha", "achha", "accha",
+    "acche", "ache",
+    "badiya", "badhiya",
+    "sahi", "galat",
+    "thik", "theek", "thek",
+    "nahi", "nahi", "nahin", "nai",
+    "haan", "han", "ha", "haa",
+
+    # Requests
+    "please", "pls", "plz",
+    "jara", "zara",
+    "ek", "do",
+    "madad", "help",
+    "chahiye", "zarurat",
+
+    # Greetings
+    "namaste", "namaskar",
+    "shukriya", "thanks", "thankyou",
+    "dhanyavad", "dhanyavaad",
+
+    # Slang
+    "bhai", "bro", "bros",
+    "bhaiya", "bhayya",
+    "yaar", "yar",
+    "bhaii",
+    "abe", "are", "arre",
+    "oye", "oye",
+    "boss",
+    "mast", "masttt",
+    "sahi", "jhakas",
+    "lol",
+
+    # Mixed English-Hindi
+    "wifi", "internet",
+    "phone", "mobile",
+    "camera", "photo",
+    "video", "browser",
+    "login", "logout",
+    "chatgpt", "python",
+    "story", "meeting",
+    "laptop", "computer",
+    "file", "email",
+    "message", "call",
+    },
+    "te": TELUGU_ROMAN_CORE_WORDS | 
+        {
+        # Pronouns
+        "nenu", "nen", "nuvvu", "nuvu", "nvu",
+        "meeru", "meru", "manam", "memu",
+        "atanu", "vadu", "vaadu", "vad", "vd",
+        "ame", "aame",
+        "ayana", "aayana",
+        "vallu", "vaallu", "vall", "vl",
+
+        "na", "naa", "ni", "nee", "niku", "niku", "nik",
+        "naaku", "naku", "nak",
+        "meeku", "miku", "mik",
+        "meedi", "naadi", "vaadi",
+
+        # Yes / No
+        "avnu", "avunu", "avun", "avn",
+        "kadu", "kadhu", "kaadu", "kad",
+        "ledu", "ledhu", "led",
+
+        # Questions
+        "enti", "ent", "em", "emi", "emi ra",
+        "ela", "elaa", "elaa", "elaa",
+        "enduku", "endhuku", "endukuu", "endk",
+        "ekkada", "ekkad", "ekkadiki",
+        "eppudu", "epudu", "epd",
+        "evaru", "evar", "evadu",
+        "edi", "entha", "enni",
+
+        # Common verbs
+        "cheppu", "chepu", "chepp", "cheppandi",
+        "chepta", "cheptanu", "cheptava",
+        "cheppu ra", "cheppu anna",
+
+        "chey", "cheyyi", "cheyi", "cheyy",
+        "chesa", "chesanu", "chesadu",
+        "chesava", "chesara", "chesindi",
+        "chanipoyadu", "chanipoyindi",
+
+        "matladu", "matladu", "matladuu",
+        "matladandi", "matladava",
+        "matladutunnava",
+
+        "vellu", "velu", "vellu ra",
+        "vellali", "vellandi",
+        "vachanu", "vacha", "vachindi",
+        "vastanu", "vasta", "vastunna",
+
+        # State
+        "undi", "undi ra", "unnanu",
+        "unnava", "unnaru", "untundi",
+        "untadu", "untanu",
+
+        # Conversation
+        "telusu", "telusa", "teliyadu",
+        "teliyali", "vinu", "vinandi",
+        "chudu", "choodu", "choosava",
+        "kavali", "kaavali",
+        "ivvu", "ivvandi",
+
+        # Time
+        "ippudu", "ipudu", "ippud",
+        "appudu", "apudu",
+        "ivala", "ivaala",
+        "eroju", "repu", "ninna",
+
+        # Connectors
+        "inka", "kani", "aithe",
+        "kabatti", "tarvata",
+        "mundu", "kuda", "kooda",
+
+        # Greetings
+        "namaskaram", "namaste",
+        "dhanyavadalu", "thanks",
+
+        # Casual slang
+        "anna", "ayya", "bro", "bros",
+        "bava", "mama", "mowa",
+        "rey", "ra", "raa", "orey",
+        "oyi", "oi",
+        "abba", "ammo", "ayyo",
+        "super", "mast", "mastu",
+        "bagundi", "bagundhi",
+        "bagunnava", "bagunnara",
+        "bagoledu", "bagaledu",
+
+        # Daily usage
+        "tinava", "tinnava",
+        "tinnara", "paduko",
+        "nidra", "intiki",
+        "bayata", "school",
+        "college", "office",
+
+        # Mixed English-Telugu
+        "wifi", "internet",
+        "phone", "mobile",
+        "camera", "photo",
+        "video", "browser",
+        "login", "logout",
+        "chatgpt", "python",
+        "story", "meeting",
+        "laptop", "file",
+        "message", "call"
+    },
+    "ml": MALAYALAM_ROMAN_CORE_WORDS | {
+        # Pronouns
+        "njan", "njaan", "nee", "ni", "avan", "aval", "nammal", "avr", "avru",
+
+        "njangal", "ningal", "ningalku", "avarkku",
+        # Possessives — most common Manglish words
+        "ente", "ende", "entey", "ninte", "ninde", "avante", "avalude", "nammalude",
+        # Questions
+        "enthu", "enth", "entha", "enthaa", "engane", "evidey", "evide", "eppol", "eppo",
+        "enthukond", "enthukondu", "aar", "ethu", "etha",
+        # Verbs / copula
+        "undu", "und", "undo", "illa", "ille", "aanu", "anu", "aano", "aan", "aayirunnu",
+        "agunnu", "agunn", "cheyyunnu", "cheyth", "cheythu", "poyyi", "vannu", "vann",
+        # Commands / requests
+        "para", "paraa", "parayoo", "parayou", "paranji", "paranjittu",
+        "keel", "keelu", "keelunga", "nokkoo", "nokku", "varoo", "varuu",
+        # Common words
+        "peru", "peruu", "pera", "veedu", "veetu",
+        "nalla", "nallath", "valare", "valara", "valareh", "illaa",
+        "aavo", "aavoo", "shari", "shaari", "manasilayi", "manassilayi", "kupamilla",
+        "vellam", "kazhikku", "veliye", "veliy", "velai", "neram", "divasam",
+        "raatri", "raathri", "kalathu", "raavilae", "raavile",
+        "innale", "innaleh", "naaley", "naale", "ippol", "ippo",
+        "vegam", "vegath", "paadam", "valiya", "valiy", "cheriya", "cheriy",
+        "ingey", "inge", "angey", "ange", "mukalil", "mukalile", "tazhey", "thazhey", "ullil",
+        "enikku", "enikk", "ninakku", "ninak", "avannu", "avalku",
+        "enthenkilum", "enthengilum", "ellarkum", "ellarum",
+        "malayalam", "malayalee", "malayali", "kerala", "keralam",
+        "kochi", "trivandrum", "thiruvananthapuram", "kozhikode", "calicut",
+    },
+    "ar": ARABIC_ROMAN_CORE_WORDS | {
+        "ana", "inta", "inty", "huwwa", "hiyya", "nahnu", "intum", "hum",
+        "shu", "kif", "wen", "lesh", "meen", "qaddesh", "shlonak",
+        "marhaba", "ahlan", "salam", "shukran", "afwan", "habibi", "habibti",
+        "aywah", "aiwa", "la", "mafi", "inshallah", "mashallah", "wallah",
+        "tayeb", "tamam", "zain", "yalla", "khalas", "bass",
+        "rooh", "jeeb", "haki", "beddi", "akhi", "ukhti",
+        "arabi", "arabic", "masr", "misr", "gulf", "dubai", "riyadh",
+    },
+}
 
 
 def detect_script(text: str) -> str:
     """Classify all supported Unicode scripts before considering language."""
     has_dev = any("\u0900" <= c <= "\u097F" for c in text)
     has_telugu = any("\u0C00" <= c <= "\u0C7F" for c in text)
+    has_malayalam = any("\u0D00" <= c <= "\u0D7F" for c in text)
     has_arabic = any("\u0600" <= c <= "\u06FF" for c in text)
     has_lat = any(c.isascii() and c.isalpha() for c in text)
 
-    script_count = sum((has_dev, has_telugu, has_arabic, has_lat))
+    script_count = sum((has_dev, has_telugu, has_malayalam, has_arabic, has_lat))
     if script_count > 1:
         return "mixed"
     if has_telugu:
         return "telugu"
+    if has_malayalam:
+        return "malayalam"
     if has_dev:
         return "devanagari"
     if has_arabic:
@@ -78,12 +343,11 @@ def _explicit_language_switch(text: str):
 
 
 def _roman_language_scores(tokens):
-    """Score Latin tokens against extensible Roman Hindi, Telugu, and English banks."""
+    """Score each language and let the majority of meaningful words win."""
     meaningful_tokens = [token for token in tokens if token not in TECHNICAL_BORROWED_WORDS]
     return {
-        "hi": sum(token in HINDI_ROMAN_CORE_WORDS for token in meaningful_tokens),
-        "te": sum(token in TELUGU_ROMAN_CORE_WORDS for token in meaningful_tokens),
-        "en": sum(token in ENGLISH_CORE_WORDS for token in meaningful_tokens),
+        language: sum(token in vocabulary for token in meaningful_tokens)
+        for language, vocabulary in _ROMAN_LANGUAGE_VOCABULARY.items()
     }, len(meaningful_tokens)
 
 
@@ -126,6 +390,10 @@ def resolve_language(
         return {"language": "te", "script": script, "reason": "telugu_script"}
     if script == "devanagari" or (script == "mixed" and any("\u0900" <= char <= "\u097F" for char in text)):
         return {"language": "hi", "script": script, "reason": "devanagari_script"}
+    if script == "malayalam" or (script == "mixed" and any("\u0D00" <= char <= "\u0D7F" for char in text)):
+        return {"language": "ml", "script": script, "reason": "malayalam_script"}
+    if script == "arabic" or (script == "mixed" and any("\u0600" <= char <= "\u06FF" for char in text)):
+        return {"language": "ar", "script": script, "reason": "arabic_script"}
 
     latin_tokens = [t for t in _tokens(text) if t.isascii()]
     scores, token_count = _roman_language_scores(latin_tokens)

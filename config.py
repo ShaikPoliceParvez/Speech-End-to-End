@@ -1,7 +1,7 @@
 # ========= MODELS =========
 
 STT_MODEL = "whisper"      # whisper | parakeet
-LLM_MODEL = "gemma3:4b" # gemma3:4b, qwen2.5:1.5b, gemma2:2b-instruct-q2_K is also available.
+LLM_MODEL = "gemma3:4b" # qwen2.5:3b, gemma3:4b, qwen2.5:1.5b, gemma2:2b-instruct-q2_K is also available.
 VOICE = "M1" 				 # M1 | M2 | F1 | F2 | F3 | F4 | F5 | F6
 
 # ========= LLM RESPONSE LENGTH =========
@@ -19,7 +19,8 @@ SUPPORTED_LANGUAGES = {
 	"en": "English",
 	"hi": "Hindi",
 	"te": "Telugu",
-	# "ta": "Tamil",
+	"ml": "Malayalam",
+	"ar": "Arabic",
 	# "kn": "Kannada",
 	# "ml": "Malayalam",
 	# "bn": "Bengali",
@@ -42,7 +43,7 @@ TECHNICAL_BORROWED_WORDS = {
 
 # Roman-Hindi core words used for majority-language detection.
 HINDI_ROMAN_CORE_WORDS = {
-	"aap", "ap", "mai", "main", "mein", "mujhe", "muje", "mera", "meri",
+	"aap", "ap", "mai", "main", "mein", "mujhe", "muje", "mera", "meri", "mere", "liye", "mereliye", "keliye",
 	"tum", "kaise", "kese", "kya", "hai", "hain", "ho", "kal", "naam",
 	"kitne", "baje", "chal", "raha", "rahe", "batao", "sunao", "dekh",
 	"jara", "zara", "kholo", "ek", "mein",
@@ -50,6 +51,18 @@ HINDI_ROMAN_CORE_WORDS = {
 	"acha", "achha", "accha", "badiya", "shukriya", "dhanyavad", "dhanyavaad",
 	"bas", "bass", "hogaya", "hogayi", "hua", "hui", "nahi", "nahin", "haan",
 	"han", "kyun", "kyu", "phir", "fir", "aur", "bhi",
+}
+
+# Roman-Malayalam core words used to identify Malayalam written in Latin script.
+MALAYALAM_ROMAN_CORE_WORDS = {
+	"njan", "njaan", "ente", "ende", "entey", "ninte", "ninde", "avante", "avalude",
+	"enthu", "enth", "entha", "enthaa", "engane", "evidey", "evide", "eppol", "eppo",
+	"enthukond", "enthukondu",
+	"undu", "und", "aanu", "anu", "aano", "aan", "illa", "ille",
+	"nalla", "valare", "shari", "aavo", "manasilayi", "kupamilla",
+	"veedu", "veetu", "peru", "neram", "ippol", "ippo", "innale", "naaley",
+	"enikku", "ninakku", "nammal", "ningal", "avarkku",
+	"malayalam", "malayalee", "malayali", "kerala", "keralam",
 }
 
 # Roman-Telugu core words used to identify Telugu written in Latin script.
@@ -61,7 +74,17 @@ TELUGU_ROMAN_CORE_WORDS = {
 	"ekkada", "ikkada", "akkada", "telugu", "lo", "matladu", "matladandi", "idi", "chaduvu", "rasundi",
 }
 
-# Clear English vocabulary prevents brief English turns such as "wow" or
+# Roman-Arabic (Arabizi) core words used to identify Arabic written in Latin script.
+ARABIC_ROMAN_CORE_WORDS = {
+	"ana", "inta", "inty", "huwwa", "hiyya", "nahnu", "intum", "hum",
+	"shu", "kif", "wen", "lesh", "meen", "qaddesh", "shlonak",
+	"marhaba", "ahlan", "salam", "shukran", "afwan", "habibi", "habibti",
+	"aywah", "aiwa", "la", "mafi", "inshallah", "mashallah", "wallah", "bismillah",
+	"tayeb", "tamam", "zain", "mzyan", "yalla", "khalas", "bass",
+	"rooh", "ta", "jeeb", "haki", "beddi", "bedi",
+	"akhi", "ukhti", "arabi", "arabic", "masr", "misr",
+}
+
 # "thanks" from inheriting the prior conversation language.
 ENGLISH_CORE_WORDS = {
 	"hello", "hi", "thanks", "thank", "you", "wow", "nice", "good", "awesome",
@@ -81,6 +104,8 @@ LANGUAGE_SWITCH_TARGETS = {
 	"en": {"english"},
 	"hi": {"hindi", "hindhi"},
 	"te": {"telugu", "telagum", "telugum"},
+	"ml": {"malayalam", "malayalee", "malayali"},
+	"ar": {"arabic", "arabi"},
 }
 LANGUAGE_SWITCH_ACTION_TOKENS = {
 	"speak", "talk", "switch", "language", "baat", "bolo", "bol", "mein", "me", "matladu",
@@ -111,6 +136,10 @@ HINGLISH_TOKEN_MAP = {
 	"main": "मैं",
 	"mera": "मेरा",
 	"meri": "मेरी",
+	"mere": "मेरे",
+	"liye": "लिए",
+	"mereliye": "मेरे लिए",
+	"keliye": "के लिए",
 	"naam": "नाम",
 	"kaise": "कैसे",
 	"kese": "कैसे",
@@ -119,6 +148,7 @@ HINGLISH_TOKEN_MAP = {
 	"hai": "है",
 	"hain": "हैं",
 	"kar": "कर",
+	"karo": "करो",
 	"rahe": "रहे",
 	"raha": "रहा",
 	"chal": "चल",
@@ -210,11 +240,75 @@ WHISPER_NO_SPEECH_THRESHOLD = 0.6
 # AFTER
 WHISPER_HINDI_PROMPT = "हिंदी, देवनागरी"
 WHISPER_TELUGU_PROMPT = "తెలుగు, తెలుగు లిపి"
+WHISPER_TAMIL_PROMPT = "മലയാളം, മലയാളം ലിപി"
+WHISPER_ARABIC_PROMPT = "العربية، اللغة العربية"
+
+# Prefix forces the decoder to commit to the correct script before transcribing.
+# Unlike hotwords (soft nudge), prefix is a hard constraint — the model MUST
+# start with these characters and is then very likely to continue in that script.
+WHISPER_HINDI_PREFIX = "मैं"
+WHISPER_TELUGU_PREFIX = "నేను"
+WHISPER_TAMIL_PREFIX = "ഞാൻ"
+WHISPER_ARABIC_PREFIX = "أنا"
+
+# Hotwords fed to faster-whisper's beam search during forced-language re-decode.
+# They boost token log-probabilities for native-script words, nudging the
+# decoder away from wrong-script outputs without the echo risk of initial_prompt.
+WHISPER_HINDI_HOTWORDS = (
+    "नमस्ते,आप,मैं,हम,वो,यह,क्या,कैसे,कहाँ,कब,क्यों,कौन,"
+    "है,हैं,था,थे,होगा,होगी,करो,करें,बताओ,सुनो,देखो,जाओ,"
+    "अच्छा,बहुत,नहीं,हाँ,ठीक,समझ,पानी,खाना,घर,काम,वक्त,"
+    "दिन,रात,सुबह,शाम,आज,कल,अभी,जल्दी,धीरे,बड़ा,छोटा,"
+    "मेरा,मेरी,तुम्हारा,उसका,हमारा,यहाँ,वहाँ,ऊपर,नीचे,"
+    "मुझे,तुम्हें,उसे,हमें,किसे,क्या,सब,कुछ,बात,समय,लोग,"
+    "सरकार,पैसा,बाज़ार,मोबाइल,गाना,फ़िल्म,दोस्त,परिवार"
+)
+
+WHISPER_TELUGU_HOTWORDS = (
+    "నమస్కారం,నేను,నువ్వు,మీరు,అతను,ఆమె,మనం,వాళ్ళు,"
+    "ఏమి,ఎలా,ఎక్కడ,ఎప్పుడు,ఎందుకు,ఎవరు,ఏది,ఏం,"
+    "ఉంది,ఉన్నారు,అవుతుంది,చేస్తున్నాను,చేస్తున్నారు,వెళ్ళాను,"
+    "చెప్పు,చెప్పండి,వినండి,చూడు,రండి,వెళ్ళండి,తెండి,"
+    "బాగుంది,బాగా,చాలా,లేదు,అవును,సరే,అర్థమైంది,"
+    "నీళ్ళు,తిండి,ఇల్లు,పని,సమయం,రోజు,రాత్రి,ఉదయం,"
+    "నిన్న,రేపు,ఇప్పుడు,త్వరగా,నెమ్మదిగా,పెద్ద,చిన్న,"
+    "నా,నీ,మీ,వాళ్ళ,ఇక్కడ,అక్కడ,పైన,కింద,లోపల,బయట,"
+    "నాకు,నీకు,మీకు,అతనికి,ఆమెకు,అందరికి,ఏదైనా,అన్నీ,"
+    "ప్రభుత్వం,డబ్బు,బజారు,మొబైల్,పాట,సినిమా,స్నేహితుడు,"
+    "ఆరోగ్యం,చదువు,ఉద్యోగం,వ్యాపారం,ముఖ్యం,విషయం,సమస్య,"
+    "తెలుగు,ఆంధ్ర,తెలంగాణ,హైదరాబాద్,విజయవాడ,విశాఖపట్నం"
+)
+
+WHISPER_TAMIL_HOTWORDS = (
+    "നമസ്കാരം,ഞാൻ,നീ,അവൻ,അവൾ,നമ്മൾ,അവർ,"
+    "എന്ത്,എങ്ങനെ,എവിടെ,എപ്പോൾ,എന്തുകൊണ്ട്,ആര്,ഏത്,"
+    "ഉണ്ട്,ഉണ്ടായിരുന്നു,ഇല്ല,ആണ്,ആകുന്നു,ചെയ്യുന്നു,"
+    "പറ,പറയൂ,കേൾ,കേൾക്കൂ,നോക്ക്,നോക്കൂ,വരൂ,"
+    "നല്ലത്,വളരെ,ഇല്ല,ആണ്,ശരി,മനസ്സിലായി,കുഴപ്പമില്ല,"
+    "വെള്ളം,കഴിക്ക്,വീട്,പുറത്ത്,ജോലി,സമയം,ദിവസം,രാത്രി,കാലത്ത്,"
+    "ഇന്നലെ,നാളെ,ഇപ്പോൾ,വേഗം,പതുക്കെ,വലിയ,ചെറിയ,"
+    "എന്റെ,നിന്റെ,അവന്റെ,അവളുടെ,ഇവിടെ,അവിടെ,മുകളിൽ,താഴെ,ഉള്ളിൽ,പുറത്ത്,"
+    "എനിക്ക്,നിനക്ക്,അവനു,അവൾക്ക്,എല്ലാർക്കും,"
+    "സർക്കാർ,പണം,കട,മൊബൈൽ,പാട്ട്,സിനിമ,സുഹൃത്ത്,കുടുംബം,"
+    "മലയാളം,കേരളം,തിരുവനന്തപുരം,കൊച്ചി,കോഴിക്കോട്"
+)
+
+WHISPER_ARABIC_HOTWORDS = (
+    "مرحبا,أنا,أنت,هو,هي,نحن,أنتم,هم,"
+    "ماذا,كيف,أين,متى,لماذا,من,كم,"
+    "نعم,لا,في,على,إلى,مع,من,ب,"
+    "يكون,يكونون,أريد,أحتاج,قل,قول,اسمع,شوف,"
+    "كويس,كثير,صغير,كبير,جميل,سريع,بطيء,"
+    "ماء,طعام,بيت,عمل,وقت,يوم,ليل,صباح,"
+    "اليوم,غدا,أمس,الآن,بسرعة,ببطء,"
+    "معي,معك,معه,هنا,هناك,فوق,تحت,داخل,خارج,"
+    "شكراً,عفواً,من فضلك,أهلاً,سهلاً"
+)
 
 
 # Tarz accepts speech only in these languages. Whisper initially auto-detects
 # the language, then retries unsupported detections using the default language.
-STT_ALLOWED_LANGUAGES = ("en", "hi", "te")
+STT_ALLOWED_LANGUAGES = ("en", "hi", "te", "ml", "ar")
 
 # Pseudo-streaming configuration
 # First partial after 2.0s — ensures Whisper has real speech, not leading silence
@@ -251,7 +345,15 @@ TTS_LANGUAGE_BACKENDS = {
 	"hi": {"backend": "supertonic"},
 	"te": {
 		"backend": "piper",
-		"model": "models/piper/te_IN-venkatesh-medium.onnx",
+		"model": "models/piper/te_IN-maya-medium.onnx",
+	},
+	"ml": {
+		"backend": "piper",
+		"model": "models/piper/ml_IN-coqui-high.onnx",
+	},
+	"ar": {
+		"backend": "piper",
+		"model": "models/piper/ar_JO-kareem-medium.onnx",
 	},
 }
 

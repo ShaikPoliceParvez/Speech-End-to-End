@@ -5,12 +5,148 @@ Local-first multimodal voice assistant built in Python.
 ## Features
 
 - **Voice Activity Detection (VAD)**: Automatic endpoint detection - no need to press ENTER
-- **Speech-to-Text**: Faster Whisper transcription with confidence-based verification for unreliable language detection
-- **Multilingual Support**: English, Hindi/Hinglish, and Telugu/Telglish
-- **Automatic Language Detection**: Detects language and script in real-time
+- **Speech-to-Text**: Faster Whisper transcription with confidence-based verification and script-correctness re-decode
+- **Multilingual Support**: English, Hindi/Hinglish, Telugu/Telglish, Malayalam/Manglish, and Arabic
+- **Automatic Language Detection**: Detects language and script in real-time; falls back to forced re-decode when wrong script is produced
 - **Multi-modal Input**: Voice, text, and camera input support
 - **Streaming Pipeline**: Real-time processing at every stage
 - **Intelligent Routing**: Vision, OCR, or Chat mode based on intent
+
+## Models And Configuration
+
+The active defaults in `config.py` are:
+
+| Component | Current setting | Available configuration options |
+| --- | --- | --- |
+| STT engine | Faster Whisper (`STT_MODEL = "whisper"`) | `whisper` is the implemented engine. `parakeet` is reserved as a configuration option but is not yet selected by `stt.py`. |
+| Whisper model | `small` on `cpu` with `int8` compute | Model sizes: `tiny`, `base`, `small`, `medium`, `large`. Set `WHISPER_SIZE`, `WHISPER_DEVICE`, and `WHISPER_COMPUTE`. |
+| LLM | Ollama `gemma3:4b` | Set `LLM_MODEL`. Install the selected model with Ollama first. |
+| TTS | SuperTonic `M1` for English/Hindi; Piper for Telugu, Malayalam, Arabic | Configure `TTS_LANGUAGE_BACKENDS` to select a backend and model per language. |
+| Camera | OpenCV camera `0` | Set `CAMERA_INDEX`; use `CAPTURE_SAVE_IMAGES` and `CAPTURE_MAX_FILES` to control saved captures. |
+
+Other useful options in `config.py`:
+
+- **LLM output:** `LLM_MAX_TOKENS` is `1024`.
+- **Languages:** English (`en`), Hindi (`hi`), Telugu (`te`), Malayalam (`ml`), and Arabic (`ar`) are enabled. Set `DEFAULT_LANGUAGE` or `USER_PREFERRED_LANGUAGE`.
+- **Audio and TTS:** `SAMPLE_RATE = 16000`, `TTS_SPEED = 0.92`, first-sentence streaming enabled, plus sentence-buffer and prefetch limits (`TTS_MIN_CHARS`, `TTS_MAX_CHARS`, `TTS_MIN_WORDS`, `TTS_MAX_WORDS`, `TTS_PREFETCH_TEXT`, `TTS_PREFETCH_AUDIO`). Add name pronunciations through `TTS_PRONUNCIATION_MAP`.
+- **VAD:** Active endpoint settings are `VAD_SILENCE_THRESHOLD = 0.01`, `VAD_SILENCE_DURATION = 0.8`, `VAD_MIN_SPEECH_DURATION = 0.3`, `VAD_GRACE_PERIOD = 0.2`, and `VAD_MAX_RECORD_SECONDS = 30.0`.
+- **STT decoding:** Tune `WHISPER_BEAM_SIZE = 5`, `WHISPER_LANGUAGE_CONFIDENCE_HIGH = 0.80`, fallback temperatures, quality thresholds, per-language decode prompts/prefixes/hotwords, and partial-transcript timing (`STT_MIN_PARTIAL_SECONDS`, `STT_PARTIAL_INTERVAL`, `STT_ROLLING_SECONDS`, `STT_OVERLAP_SECONDS`).
+- **Camera:** `CAMERA_INDEX = 0`, saved captures are enabled, and `CAPTURE_MAX_FILES = 20` limits retained images.
+- **Conversation behavior:** `MAX_HISTORY` controls retained turns; `ROUTER_CONFIDENCE_THRESHOLD` controls when the router asks for clarification.
+- **Runtime switches:** `ENABLE_LIVE_TRANSCRIPT`, `ENABLE_PARTIAL_TRANSCRIPTS`, `MAX_PARTIAL_UPDATES_PER_SECOND`, and `DEBUG` control console behavior and diagnostic output.
+
+## Installation
+
+```bash
+pip install -r requirements.txt
+```
+
+## Piper TTS Models
+
+Telugu, Malayalam, and Arabic use [Piper](https://github.com/rhasspy/piper) for TTS. Download models into `models/piper/`:
+
+```powershell
+# Telugu (included)
+# te_IN-maya-medium.onnx  (already in repo)
+
+# Malayalam
+Invoke-WebRequest -Uri "https://huggingface.co/rhasspy/piper-voices/resolve/main/ml/ml_IN/coqui/high/ml_IN-coqui-high.onnx" -OutFile "models\piper\ml_IN-coqui-high.onnx"
+Invoke-WebRequest -Uri "https://huggingface.co/rhasspy/piper-voices/resolve/main/ml/ml_IN/coqui/high/ml_IN-coqui-high.onnx.json" -OutFile "models\piper\ml_IN-coqui-high.onnx.json"
+
+# Arabic
+Invoke-WebRequest -Uri "https://huggingface.co/rhasspy/piper-voices/resolve/main/ar/ar_JO/kareem/medium/ar_JO-kareem-medium.onnx" -OutFile "models\piper\ar_JO-kareem-medium.onnx"
+Invoke-WebRequest -Uri "https://huggingface.co/rhasspy/piper-voices/resolve/main/ar/ar_JO/kareem/medium/ar_JO-kareem-medium.onnx.json" -OutFile "models\piper\ar_JO-kareem-medium.onnx.json"
+```
+
+## Langfuse Tracing
+
+Tarz records one Langfuse trace per conversation turn, grouped into a session.
+Voice traces include `VAD`, `STT`, `Router`, `Memory`, `LLM`, `TTS`, and
+`Playback` spans, plus a `Camera` tool span when requested. They capture VAD timing,
+STT first-segment and completion latency, LLM time-to-first-token and token rate,
+TTS synthesis timing, playback queue delay, and end-to-end latency. The root trace
+also records session/conversation/request IDs, configured models, voice, and CPU/RAM
+usage. It also includes startup time for Whisper and SuperTonic plus Ollama model
+readiness; the first LLM request records `cold_start_ttft_ms` to expose inference
+model-load cost. Camera frames and audio are never included in traces. Text sent to Langfuse
+masks common email addresses and phone numbers.
+
+Copy `.env.example` to `.env`, then add API keys from your Langfuse project:
+
+```bash
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+```
+
+Tracing is disabled until both keys are set. Use the appropriate Langfuse base URL
+for your cloud region or self-hosted deployment.
+
+## Voice Mode (VAD Enabled)
+
+```
+🎤 Listening... (Auto-stop on silence)
+       🔊 Speaking (energy: 0.03)
+       ✓ Endpoint detected
+
+✓ Recorded: 2.34s
+You: what's the weather
+Language: English | Script: latin
+```
+
+**No keyboard input needed!** The system automatically stops recording after detecting 800ms of silence.
+
+See [VAD_ENDPOINT_DETECTION.md](VAD_ENDPOINT_DETECTION.md) for detailed configuration and tuning.
+
+## Architecture
+
+- app.py
+- config.py
+- microphone.py (with VAD)
+- stt.py (Faster Whisper transcription)
+- language.py (language + script detection)
+- router.py
+- camera.py
+- memory.py
+- llm.py
+- tts.py / tts_router.py / piper_tts.py
+
+No heavy framework. The application records an utterance, transcribes it, then streams the response to TTS.
+
+## Runtime Pipeline
+
+```mermaid
+flowchart TD
+    INPUT{Voice or text input}
+    INPUT -->|Voice| VAD[Voice activity detection]
+    INPUT -->|Text| TEXT[Text message]
+    VAD --> STT[Speech to text]
+    STT --> LANGUAGE[Language + script detection]
+    TEXT --> LANGUAGE
+    LANGUAGE --> ROUTER[Intent router]
+    ROUTER --> ACTION{Chat, Vision, or OCR}
+    ACTION --> LLM[LLM response]
+    LLM --> TTS[TTS router]
+    TTS -->|en / hi| SUPERTONIC[SuperTonic]
+    TTS -->|te / ml / ar| PIPER[Piper]
+    SUPERTONIC --> OUTPUT[Playback]
+    PIPER --> OUTPUT
+```
+
+## Multilingual Behavior
+
+| Language | Code | STT script re-decode | Roman input detection | TTS backend |
+|---|---|---|---|---|
+| English | `en` | — | Latin vocabulary | SuperTonic |
+| Hindi | `hi` | Devanagari forced re-decode | `HINDI_ROMAN_CORE_WORDS` | SuperTonic |
+| Telugu | `te` | Telugu script forced re-decode | `TELUGU_ROMAN_CORE_WORDS` | Piper (maya-medium) |
+| Malayalam | `ml` | Malayalam script forced re-decode | `MALAYALAM_ROMAN_CORE_WORDS` | Piper (coqui-high) |
+| Arabic | `ar` | Arabic script forced re-decode | `ARABIC_ROMAN_CORE_WORDS` | Piper (kareem-medium) |
+
+- Native script input is detected directly from Unicode ranges and routed to the correct language instantly.
+- Roman/Romanized input (Hinglish, Telglish, Manglish, Arabizi) is matched against per-language core word sets.
+- When Whisper produces the wrong script (e.g. Devanagari for Telugu speech), a second forced-language decode is triggered automatically using a script-specific prefix and hotwords.
+- LLM system prompts enforce output language per turn; Hindi explicitly blocks Arabic/Urdu output to prevent model confusion over Arabic-sounding names.
 
 ## Models And Configuration
 
