@@ -127,7 +127,7 @@ _ROMAN_LANGUAGE_VOCABULARY = {
     "chahiye", "zarurat",
 
     # Greetings
-    "namaste", "namaskar",
+    "namaste", "namaskar", 
     "shukriya", "thanks", "thankyou",
     "dhanyavad", "dhanyavaad",
 
@@ -288,15 +288,14 @@ _ROMAN_LANGUAGE_VOCABULARY = {
         "enthenkilum", "enthengilum", "ellarkum", "ellarum",
         "malayalam", "malayalee", "malayali", "kerala", "keralam",
         "kochi", "trivandrum", "thiruvananthapuram", "kozhikode", "calicut",
+        "vanakkam", "namaskaram", "namaskar", "ayyo", "aiyyo",
     },
     "ar": ARABIC_ROMAN_CORE_WORDS | {
-        "ana", "inta", "inty", "huwwa", "hiyya", "nahnu", "intum", "hum",
-        "shu", "kif", "wen", "lesh", "meen", "qaddesh", "shlonak",
-        "marhaba", "ahlan", "salam", "shukran", "afwan", "habibi", "habibti",
-        "aywah", "aiwa", "la", "mafi", "inshallah", "mashallah", "wallah",
-        "tayeb", "tamam", "zain", "yalla", "khalas", "bass",
-        "rooh", "jeeb", "haki", "beddi", "akhi", "ukhti",
-        "arabi", "arabic", "masr", "misr", "gulf", "dubai", "riyadh",
+        # Extra Arabizi variants not in core
+        "maa3", "ind", "thumma",
+        "na3am", "atakallam", "asma3", "akhbirni",
+        "hadha", "hatha", "hadi", "hadhi", "kullu", "baad", "qabl",
+        "gulf", "dubai", "riyadh", "arabi", "arabic", "masr", "misr",
     },
 }
 
@@ -410,9 +409,15 @@ def resolve_language(
     ):
         return {"language": supported_hint, "script": script, "reason": "high_confidence_whisper"}
 
-    # Clear non-ambiguous Latin input is English even if the previous turn was
-    # Hindi or Telugu; this prevents language state from becoming sticky.
+    # If any language vocabulary matched (even tied), prefer conversation history
+    # over the English fallback — single shared words like greetings should stay
+    # in the active language rather than resetting to English.
+    any_lang_match = any(s > 0 for s in scores.values())
     if latin_tokens and not all(token in AMBIGUOUS_LANGUAGE_TOKENS for token in latin_tokens):
+        if any_lang_match:
+            for candidate in (supported_hint, previous_language, USER_PREFERRED_LANGUAGE):
+                if candidate and candidate.lower() in SUPPORTED_LANGUAGES:
+                    return {"language": candidate.lower(), "script": script, "reason": "shared_word_fallback"}
         return {"language": "en", "script": script, "reason": "latin_fallback"}
 
     # Arabic/Persian is unsupported. STT retries it; this final fallback keeps

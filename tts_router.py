@@ -4,6 +4,9 @@ from config import DEFAULT_LANGUAGE, TTS_LANGUAGE_BACKENDS
 from piper_tts import PiperSpeaker
 from tts import Speaker
 
+# Languages routed to SuperTonic; all others use Piper.
+_SUPERTONIC_LANGUAGES = {"en", "hi"}
+
 
 class TTSRouter:
     """Selects a TTS backend by language while preserving Speaker's API."""
@@ -57,8 +60,9 @@ class TTSRouter:
         language, route = self._route(language)
         self._language = language
         self._backend_name = route["backend"]
-        if self._backend_name == "supertonic":
+        if language in _SUPERTONIC_LANGUAGES:
             self.supertonic.set_language(language)
+        # te / ml / ar go to Piper — SuperTonic is not called for these
 
     def set_event_handler(self, on_event):
         """Update event handling for the active and lazily loaded backends."""

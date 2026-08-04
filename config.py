@@ -1,7 +1,7 @@
 # ========= MODELS =========
 
 STT_MODEL = "whisper"      # whisper | parakeet
-LLM_MODEL = "gemma3:4b" # qwen2.5:3b, gemma3:4b, qwen2.5:1.5b, gemma2:2b-instruct-q2_K is also available.
+LLM_MODEL = "qwen2.5:1.5b" # qwen2.5:3b, gemma3:4b, qwen2.5:1.5b, gemma2:2b-instruct-q2_K is also available.
 VOICE = "M1" 				 # M1 | M2 | F1 | F2 | F3 | F4 | F5 | F6
 
 # ========= LLM RESPONSE LENGTH =========
@@ -51,6 +51,7 @@ HINDI_ROMAN_CORE_WORDS = {
 	"acha", "achha", "accha", "badiya", "shukriya", "dhanyavad", "dhanyavaad",
 	"bas", "bass", "hogaya", "hogayi", "hua", "hui", "nahi", "nahin", "haan",
 	"han", "kyun", "kyu", "phir", "fir", "aur", "bhi",
+	"ayyo", "aiyyo",
 }
 
 # Roman-Malayalam core words used to identify Malayalam written in Latin script.
@@ -63,6 +64,7 @@ MALAYALAM_ROMAN_CORE_WORDS = {
 	"veedu", "veetu", "peru", "neram", "ippol", "ippo", "innale", "naaley",
 	"enikku", "ninakku", "nammal", "ningal", "avarkku",
 	"malayalam", "malayalee", "malayali", "kerala", "keralam",
+	"vanakkam", "namaskaram", "namaskar", "ayyo", "aiyyo", "ente amma",
 }
 
 # Roman-Telugu core words used to identify Telugu written in Latin script.
@@ -72,17 +74,46 @@ TELUGU_ROMAN_CORE_WORDS = {
 	"cheppu", "cheppandi", "chey", "cheyyi", "choodu", "choosi", "kanipistundi", "kavali", "avunu", "kaadu",
 	"ledu", "namaskaram", "dhanyavadalu", "peru", "pairu", "evaru", "eppudu", "enduku", "katha", "vinali", "inko",
 	"ekkada", "ikkada", "akkada", "telugu", "lo", "matladu", "matladandi", "idi", "chaduvu", "rasundi",
+	"namaskaram", "namaste", "ayyo", "aiyyo",
 }
 
 # Roman-Arabic (Arabizi) core words used to identify Arabic written in Latin script.
 ARABIC_ROMAN_CORE_WORDS = {
-	"ana", "inta", "inty", "huwwa", "hiyya", "nahnu", "intum", "hum",
-	"shu", "kif", "wen", "lesh", "meen", "qaddesh", "shlonak",
-	"marhaba", "ahlan", "salam", "shukran", "afwan", "habibi", "habibti",
-	"aywah", "aiwa", "la", "mafi", "inshallah", "mashallah", "wallah", "bismillah",
+	# Pronouns
+	"ana", "inta", "inti", "inty", "huwwa", "huwa", "hiyya", "hiya", "nahnu", "intum", "hum",
+	# Question words
+	"ma", "man", "hal", "kaif", "kayf", "kaifa", "kaifak",
+	"mata", "ayna", "wein", "wayn", "wen",
+	"kam", "leish", "lesh", "meen", "qaddesh",
+	# Prepositions / conjunctions
+	"fi", "min", "ila", "maa", "ala", "li", "bi", "ind",
+	"wa", "aw", "fa", "thumma", "lakin",
+	# Negation / affirmation
+	"la", "mush", "mesh", "mafi",
+	"na3am", "aywa", "aywah", "aiwa",
+	# Common verbs
+	"kan", "yakun", "akun",
+	"ureed", "urid", "beddi", "bedi",
+	"atakallam", "takallam",
+	"afham", "tafham",
+	"asma", "asma3",
+	"akhbirni", "qul", "rooh", "jeeb", "ta", "haki",
+	# Names / identity
+	"ismi", "ism", "ismak", "ismik",
+	# Demonstratives / location
+	"hadha", "hatha", "hadi", "hadhi",
+	"hina", "hunak", "huna",
+	"kullu", "baad", "qabl",
+	# Greetings / social
+	"shu", "shlonak", "shlonk", "shlonich", "shlon", "kif", "kifak", "kifik",
+	"marhaba", "marhaban", "ahlan", "salam", "shukran", "afwan", "habibi", "habibti",
+	"inshallah", "mashallah", "wallah", "bismillah",
 	"tayeb", "tamam", "zain", "mzyan", "yalla", "khalas", "bass",
-	"rooh", "ta", "jeeb", "haki", "beddi", "bedi",
-	"akhi", "ukhti", "arabi", "arabic", "masr", "misr",
+	"akhi", "ukhti",
+	# Time
+	"sabah", "sabahalkheir", "masaa", "masaalkheir",
+	# Places
+	"arabi", "arabic", "masr", "misr",
 }
 
 # "thanks" from inheriting the prior conversation language.
@@ -218,13 +249,13 @@ HINGLISH_PHRASE_MAP = {
 
 # "small" is the realistic minimum for usable Hindi accuracy. The multilingual
 # "base" model is notably weak on Devanagari; "small" runs fine on cpu/int8.
-WHISPER_SIZE = "small" #tiny | base | small | medium | large
+WHISPER_SIZE = "base" #tiny | base | small | medium | large
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE = "int8"
 
 # Beam search improves accuracy for non-English speech. Greedy (beam_size=1) is
 # used for fast partials; the final transcript uses a wider beam.
-WHISPER_BEAM_SIZE = 5
+WHISPER_BEAM_SIZE = 1
 
 # Temperature fallback: if a decode is low-confidence / repetitive, Whisper
 # retries at higher temperatures instead of emitting garbage.
@@ -240,7 +271,7 @@ WHISPER_NO_SPEECH_THRESHOLD = 0.6
 # AFTER
 WHISPER_HINDI_PROMPT = "हिंदी, देवनागरी"
 WHISPER_TELUGU_PROMPT = "తెలుగు, తెలుగు లిపి"
-WHISPER_TAMIL_PROMPT = "മലയാളം, മലയാളം ലിപി"
+WHISPER_MALAYALAM_PROMPT = "മലയാളം, മലയാളം ലിപി"
 WHISPER_ARABIC_PROMPT = "العربية، اللغة العربية"
 
 # Prefix forces the decoder to commit to the correct script before transcribing.
@@ -248,7 +279,7 @@ WHISPER_ARABIC_PROMPT = "العربية، اللغة العربية"
 # start with these characters and is then very likely to continue in that script.
 WHISPER_HINDI_PREFIX = "मैं"
 WHISPER_TELUGU_PREFIX = "నేను"
-WHISPER_TAMIL_PREFIX = "ഞാൻ"
+WHISPER_MALAYALAM_PREFIX = "ഞാൻ"
 WHISPER_ARABIC_PREFIX = "أنا"
 
 # Hotwords fed to faster-whisper's beam search during forced-language re-decode.
@@ -279,7 +310,7 @@ WHISPER_TELUGU_HOTWORDS = (
     "తెలుగు,ఆంధ్ర,తెలంగాణ,హైదరాబాద్,విజయవాడ,విశాఖపట్నం"
 )
 
-WHISPER_TAMIL_HOTWORDS = (
+WHISPER_MALAYALAM_HOTWORDS = (
     "നമസ്കാരം,ഞാൻ,നീ,അവൻ,അവൾ,നമ്മൾ,അവർ,"
     "എന്ത്,എങ്ങനെ,എവിടെ,എപ്പോൾ,എന്തുകൊണ്ട്,ആര്,ഏത്,"
     "ഉണ്ട്,ഉണ്ടായിരുന്നു,ഇല്ല,ആണ്,ആകുന്നു,ചെയ്യുന്നു,"
@@ -349,7 +380,7 @@ TTS_LANGUAGE_BACKENDS = {
 	},
 	"ml": {
 		"backend": "piper",
-		"model": "models/piper/ml_IN-coqui-high.onnx",
+		"model": "models/piper/ml_IN-arjun-medium.onnx",
 	},
 	"ar": {
 		"backend": "piper",

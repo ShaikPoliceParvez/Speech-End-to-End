@@ -14,13 +14,15 @@ from config import (
     WHISPER_NO_SPEECH_THRESHOLD,
     WHISPER_HINDI_PROMPT,
     WHISPER_TELUGU_PROMPT,
-    WHISPER_TAMIL_PROMPT,
+    WHISPER_MALAYALAM_PROMPT,
     WHISPER_ARABIC_PROMPT,
     WHISPER_LANGUAGE_CONFIDENCE_HIGH,
     STT_ALLOWED_LANGUAGES,
     DEFAULT_LANGUAGE,
     HINDI_ROMAN_CORE_WORDS,
     TELUGU_ROMAN_CORE_WORDS,
+    MALAYALAM_ROMAN_CORE_WORDS,
+    ARABIC_ROMAN_CORE_WORDS,
     ENGLISH_CORE_WORDS,
     TECHNICAL_BORROWED_WORDS,
 )
@@ -51,7 +53,7 @@ class STT:
         initial_prompt = {
             "hi": WHISPER_HINDI_PROMPT,
             "te": WHISPER_TELUGU_PROMPT,
-            "ml": WHISPER_TAMIL_PROMPT,
+            "ml": WHISPER_MALAYALAM_PROMPT,
             "ar": WHISPER_ARABIC_PROMPT,
         }.get(language)
         return self.model.transcribe(
@@ -69,7 +71,7 @@ class STT:
             no_speech_threshold=WHISPER_NO_SPEECH_THRESHOLD,
         )
 
-    def _retry_supported_languages(self, audio, final):
+    def _retry_supported_languages(self, audio, final, candidates=None):
         """
         Retry only with supported languages and select the cleanest
         transcription, not merely the largest language probability.
@@ -80,7 +82,7 @@ class STT:
         best_first_segment_ms = None
 
         retry_start = time.perf_counter()
-        for language in STT_ALLOWED_LANGUAGES:
+        for language in (candidates or STT_ALLOWED_LANGUAGES):
             try:
                 segments, info = self._decode(audio, language, final)
                 segments = list(segments)
@@ -113,7 +115,7 @@ class STT:
 
     @staticmethod
     def _roman_language(text):
-        """Identify decisive Roman Telugu, Hindi, or English vocabulary."""
+        """Identify decisive Roman-script language vocabulary across all supported languages."""
         tokens = [
             token.lower()
             for token in re.findall(r"[a-zA-Z]+", text)
@@ -126,6 +128,8 @@ class STT:
             "en": sum(token in ENGLISH_CORE_WORDS for token in tokens),
             "hi": sum(token in HINDI_ROMAN_CORE_WORDS for token in tokens),
             "te": sum(token in TELUGU_ROMAN_CORE_WORDS for token in tokens),
+            "ml": sum(token in MALAYALAM_ROMAN_CORE_WORDS for token in tokens),
+            "ar": sum(token in ARABIC_ROMAN_CORE_WORDS for token in tokens),
         }
         language = max(scores, key=scores.get)
         hits = scores[language]
@@ -232,6 +236,7 @@ class STT:
         # digits or punctuation) is just as broken for either language.
         needs_retry = (
             language is None
+            and detected_language != "en"
             and (
                 getattr(info, "language_probability", 0.0) < WHISPER_LANGUAGE_CONFIDENCE_HIGH
                 or
@@ -247,8 +252,23 @@ class STT:
         )
 
         if needs_retry:
+            # Narrow candidates by script so we do 1 decode instead of all 5.
+            if script == "devanagari":
+                candidates = ("en", "hi")  # Devanagari is unambiguously Hindi/Urdu
+            elif detected_language == "hi":
+                candidates = ("en", "hi")  # Hinglish (Latin) is the only real Hindi/English confusion
+            elif script == "telugu":
+                candidates = ("te", "en")  # include en for Telglish code-switching
+            elif script == "malayalam":
+                candidates = ("ml",)
+            elif script == "arabic":
+                candidates = ("ar",)
+            elif detected_language in STT_ALLOWED_LANGUAGES:
+                candidates = (detected_language,)
+            else:
+                candidates = STT_ALLOWED_LANGUAGES
             retry_segments, retry_info, retry_first_segment_ms = self._retry_supported_languages(
-                audio, final
+                audio, final, candidates
             )
 
             if retry_segments:

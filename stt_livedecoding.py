@@ -35,15 +35,15 @@ from config import (
     WHISPER_NO_SPEECH_THRESHOLD,
     WHISPER_HINDI_PROMPT,
     WHISPER_TELUGU_PROMPT,
-    WHISPER_TAMIL_PROMPT,
+    WHISPER_MALAYALAM_PROMPT,
     WHISPER_ARABIC_PROMPT,
     WHISPER_HINDI_HOTWORDS,
     WHISPER_TELUGU_HOTWORDS,
-    WHISPER_TAMIL_HOTWORDS,
+    WHISPER_MALAYALAM_HOTWORDS,
     WHISPER_ARABIC_HOTWORDS,
     WHISPER_HINDI_PREFIX,
     WHISPER_TELUGU_PREFIX,
-    WHISPER_TAMIL_PREFIX,
+    WHISPER_MALAYALAM_PREFIX,
     WHISPER_ARABIC_PREFIX,
     STT_ALLOWED_LANGUAGES,
 )
@@ -119,7 +119,7 @@ def _wrong_script(text: str, language: str) -> bool:
 def _is_prompt_echo(text: str) -> bool:
     """True when Whisper parrotted the initial prompt instead of transcribing audio."""
     for prompt in (WHISPER_HINDI_PROMPT, WHISPER_TELUGU_PROMPT,
-                   WHISPER_TAMIL_PROMPT, WHISPER_ARABIC_PROMPT):
+                   WHISPER_MALAYALAM_PROMPT, WHISPER_ARABIC_PROMPT):
         if prompt and any(word in text for word in prompt.split(",")):
             return True
     return False
@@ -143,8 +143,8 @@ def live_decode(stt, audio, language=None, label="Pass"):
         hotwords = WHISPER_TELUGU_HOTWORDS
         prefix = WHISPER_TELUGU_PREFIX
     elif language == "ml":
-        hotwords = WHISPER_TAMIL_HOTWORDS
-        prefix = WHISPER_TAMIL_PREFIX
+        hotwords = WHISPER_MALAYALAM_HOTWORDS
+        prefix = WHISPER_MALAYALAM_PREFIX
     elif language == "ar":
         hotwords = WHISPER_ARABIC_HOTWORDS
         prefix = WHISPER_ARABIC_PREFIX
