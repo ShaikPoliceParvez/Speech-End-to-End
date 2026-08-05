@@ -408,7 +408,7 @@ TTS_CONTEXT_PREFACE_RANDOM = True
 # - normal: default preface selection
 # - slow: prefer longer, naturally paced preface variants
 TTS_PREFACE_PACING = "slow"
-TTS_PREFACE_MIN_WORDS = 3
+TTS_PREFACE_MIN_WORDS = 5
 
 LANGUAGE_PREFACES = {
 	"en": {

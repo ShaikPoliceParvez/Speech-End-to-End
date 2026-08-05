@@ -317,6 +317,20 @@ class LLM:
                 "Never translate unless the user explicitly asks for translation."
             )
 
+        # The TTS bridge/preface may already be spoken before generated tokens
+        # are heard by the user. The model must continue from that point.
+        system_instruction += (
+            "A short conversational bridge may already have been spoken to the user just before this response. "
+            "Treat that bridge as the first sentence of your reply and continue naturally from it. "
+            "Do not repeat, paraphrase, or restate that bridge. "
+            "Do not restart the conversation with a new greeting or acknowledgement if it was already covered. "
+            "Do not add another bridge-like opener such as 'sure', 'certainly', 'okay', or 'let me help' unless essential. "
+            "Start with substantive continuation as early as possible. "
+            "For factual or task requests, continue directly with the answer, steps, story content, translation, or solution instead of re-announcing the action. "
+            "For greetings, compliments, or acknowledgements, continue naturally in a concise conversational way without repeating what was already acknowledged. "
+            "The bridge and generated continuation must feel like one seamless spoken response. "
+        )
+
         if social_turn:
             # Keep social-turn instructions compact to reduce TTFT for greetings.
             system_instruction += (
