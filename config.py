@@ -9,9 +9,18 @@ VOICE = "F2" 				 # M1 | M2 | F1 | F2 | F3 | F4 | F5 | F6
 # Upper bound on generated tokens. A lower cap improves responsiveness and
 # keeps spoken answers concise for voice-first interactions.
 LLM_MAX_TOKENS = 512
+# Short social/acknowledgement turns do not need long generations.
+LLM_SOCIAL_MAX_TOKENS = 96
 
 # Warm the model once at startup so first live query has a lower TTFT.
 LLM_WARMUP_ON_STARTUP = True
+
+# History policy for response generation:
+# - "strict": ignore prior chat unless explicitly requested or a follow-up lock prompt is present.
+# - "full": always include conversation history.
+LLM_HISTORY_MODE = "strict"
+# Number of prior user+assistant turns to include when history is allowed.
+LLM_HISTORY_TURNS = 2
 
 # ========= LANGUAGE =========
 
@@ -345,7 +354,7 @@ STT_ALLOWED_LANGUAGES = ("en", "hi", "te", "ml", "ar")
 
 # Use previous conversation language as STT decode hint for faster follow-up
 # turns in multilingual conversations.
-STT_PREFER_PREVIOUS_LANGUAGE_HINT = True
+STT_PREFER_PREVIOUS_LANGUAGE_HINT = False
 
 # Pseudo-streaming configuration
 # First partial after 2.0s — ensures Whisper has real speech, not leading silence
@@ -395,15 +404,20 @@ TTS_LEAD_WORDS_COUNT = 2
 # e.g. "Okay, here is a story for you." then continue generated content.
 TTS_CONTEXT_PREFACE_ENABLED = True
 TTS_CONTEXT_PREFACE_RANDOM = True
+# Filler pacing controls.
+# - normal: default preface selection
+# - slow: prefer longer, naturally paced preface variants
+TTS_PREFACE_PACING = "slow"
+TTS_PREFACE_MIN_WORDS = 3
 
 LANGUAGE_PREFACES = {
 	"en": {
 		"greeting": ["Hello!", "Hi there!", "Hey!", "Nice to hear from you!"],
 		"smalltalk": ["Glad to hear that.", "Nice!", "That sounds good."],
 		"appreciation": ["Great!", "Awesome.", "Happy to hear that."],
-		"generic": ["Sure.", "Alright.", "Let's see.", "Okay."],
-		"answer": ["Here's what I found.", "Let me explain.", "Certainly.", "Here's the answer."],
-		"story": ["Here's a story for you.", "Once upon a time...", "Let's begin."],
+		"generic": ["Sure, I can help with that.", "Alright, let me help you.", "Okay, let us go through it."],
+		"answer": ["Sure, here is what I can tell you.", "Certainly, here is the answer.", "Alright, let me explain clearly."],
+		"story": ["Sure, let us begin a story.", "Alright, here comes a story.", "Great, let us start the story."],
 		"poem": ["Here's a poem.", "I hope you enjoy it."],
 		"weather": ["Let me check.", "Here's the weather update."],
 		"news": ["Here's what's happening.", "Let's take a look."],
@@ -423,9 +437,9 @@ LANGUAGE_PREFACES = {
 		"greeting": ["नमस्ते!", "नमस्कार!"],
 		"smalltalk": ["अच्छा लगा सुनकर।", "बहुत बढ़िया।", "यह अच्छा है।"],
 		"appreciation": ["बहुत अच्छा!", "शानदार।", "यह सुनकर खुशी हुई।"],
-		"generic": ["ज़रूर।", "ठीक है।"],
-		"answer": ["बताता हूँ।", "यह रहा उत्तर।"],
-		"story": ["एक कहानी सुनिए।"],
+		"generic": ["ज़रूर, मैं मदद करता हूँ।", "ठीक है, मैं मदद करता हूँ।"],
+		"answer": ["ज़रूर, यह रहा जवाब।", "ठीक है, मैं साफ़-साफ़ बताता हूँ।"],
+		"story": ["नमस्ते, कहानी शुरू करते हैं।"],
 		"poem": ["यह रही एक कविता।"],
 		"weather": ["मौसम की जानकारी देखता हूँ।"],
 		"news": ["यह रही ताज़ा जानकारी।"],
@@ -445,17 +459,17 @@ LANGUAGE_PREFACES = {
 		"greeting": ["నమస్కారం! ఎలా ఉన్నారు?", "హాయ్! మీకు ఎలా సహాయం చేయగలను?"],
 		"smalltalk": ["వినడానికి బాగుంది.", "చాలా బాగుంది.", "అది మంచి విషయం."],
 		"appreciation": ["అద్భుతం!", "సూపర్.", "అది విని సంతోషంగా ఉంది."],
-		"generic": ["సరే.", "అలాగే."],
-		"answer": ["ఇది మీకు సమాధానం.", "నేను వివరిస్తాను."],
-		"story": ["మీ కోసం ఒక కథ చెబుతాను.", "ఒకసారి..."],
+		"generic": ["సరే, నేను సహాయం చేస్తాను.", "అలాగే, దీనిని కలిసి చూసేద్దాం."],
+		"answer": ["సరే, ఇది మీకు సమాధానం.", "అలాగే, స్పష్టంగా వివరిస్తాను."],
+		"story": ["సరే, కథను ప్రారంభిద్దాం.", "బాగుంది, ఇప్పుడు ఒక కథ చెబుతాను."],
 		"poem": ["ఇది ఒక కవిత.", "మీకు నచ్చుతుందని ఆశిస్తున్నాను."],
-		"weather": ["వాతావరణం చెక్ చేస్తాను.", "ఇది వాతావరణ సమాచారం."],
-		"news": ["ఇవి తాజా వార్తలు.", "చూడదాం ఏముంది."],
-		"camera": ["కెమెరా తెరిస్తున్నాను.", "ఒక్కసారి చూసేస్తాను."],
-		"translation": ["ఇది అనువాదం."],
-		"math": ["లెక్క చేద్దాం."],
-		"coding": ["దీన్ని పరిష్కరిద్దాం.", "ఇది కోడ్."],
-		"search": ["చూస్తున్నాను."],
+		"weather": ["సరే, వాతావరణ వివరాలు చెక్ చేస్తాను.", "ఇప్పుడు వాతావరణ సమాచారం చెబుతాను."],
+		"news": ["సరే, తాజా వార్తలు చెబుతాను.", "ఇప్పుడు ఏముంది చూద్దాం."],
+		"camera": ["సరే, కెమెరా తెరిచి చూస్తాను.", "అలాగే, ఒకసారి చూసి చెబుతాను."],
+		"translation": ["సరే, ఇది అనువాదం.", "అలాగే, మీకు అనువదించి చెబుతాను."],
+		"math": ["సరే, లెక్క చేద్దాం.", "అలాగే, దాన్ని దశలవారీగా గణిస్తాను."],
+		"coding": ["సరే, దీన్ని పరిష్కరిద్దాం.", "అలాగే, కోడ్‌తో స్పష్టంగా చూపిస్తాను."],
+		"search": ["సరే, దీనిని చూసి చెబుతాను.", "అలాగే, వివరాలు వెతికి చెబుతాను."],
 		"thanks": ["స్వాగతం!", "సహాయం చేసినందుకు ఆనందంగా ఉంది!"],
 		"goodbye": ["మళ్లీ కలుద్దాం!", "జాగ్రత్త!"],
 		"apology": ["పర్లేదు."],
@@ -467,17 +481,17 @@ LANGUAGE_PREFACES = {
 		"greeting": ["നമസ്കാരം!", "ഹലോ!"],
 		"smalltalk": ["അത് കേട്ട് സന്തോഷം.", "നല്ലതാണ്.", "അത് നല്ല കാര്യമാണ്."],
 		"appreciation": ["വളരെ നല്ലത്!", "അദ്ഭുതം.", "അത് കേട്ട് സന്തോഷം."],
-		"generic": ["ശരി.", "അങ്ങനെ ചെയ്യാം."],
-		"answer": ["ഇതാണ് ഉത്തരम्.", "ഞാൻ വിശദീകരിക്കാം."],
-		"story": ["നിങ്ങൾക്കായി ഒരു കഥ പറയുന്നു.", "ഒരിക്കൽ..."],
+		"generic": ["ശരി, ഞാൻ സഹായിക്കാം.", "അങ്ങനെ ചെയ്യാം, നമുക്ക് നോക്കാം."],
+		"answer": ["ശരി, ഇതാണ് ഉത്തരം.", "അങ്ങനെ ചെയ്യാം, ഞാൻ വ്യക്തമായി വിശദീകരിക്കാം."],
+		"story": ["ശരി, കഥ തുടങ്ങാം.", "ഇപ്പോൾ ഒരു കഥ പറയാം."],
 		"poem": ["ഇതാണ് ഒരു കവിത.", "നിങ്ങൾക്ക് ഇഷ്ടപ്പെടുമെന്ന് കരുതുന്നു."],
-		"weather": ["കാലാവസ്ഥ നോക്കാം.", "ഇതാണ് കാലാവസ്ഥ വിവരങ്ങൾ."],
-		"news": ["ഇവയാണ് പുതിയ വാർത്തകൾ.", "ഒന്ന് നോക്കാം."],
-		"camera": ["ക്യാമറ തുറക്കുന്നു.", "ഒന്ന് നോക്കട്ടെ."],
-		"translation": ["ഇതാണ് വിവർത്തനം."],
-		"math": ["കണക്കാക്കാം."],
-		"coding": ["ഇത് പരിഹരിക്കാം.", "ഇതാണ് കോഡ്."],
-		"search": ["നോക്കുന്നു."],
+		"weather": ["ശരി, കാലാവസ്ഥ വിവരങ്ങൾ നോക്കാം.", "ഇപ്പോൾ കാലാവസ്ഥ അപ്ഡേറ്റ് പറയുന്നു."],
+		"news": ["ശരി, പുതിയ വാർത്തകൾ പറയുന്നു.", "ഇപ്പോൾ എന്തുണ്ട് എന്ന് നോക്കാം."],
+		"camera": ["ശരി, ക്യാമറ തുറന്ന് നോക്കാം.", "അങ്ങനെ ചെയ്യാം, ഒന്ന് കണ്ടു പറയുന്നു."],
+		"translation": ["ശരി, ഇതാണ് വിവർത്തനം.", "അങ്ങനെ ചെയ്യാം, ഞാൻ ഇത് വിവർത്തനം ചെയ്ത് പറയുന്നു."],
+		"math": ["ശരി, നമുക്ക് കണക്കാക്കാം.", "അങ്ങനെ ചെയ്യാം, ഘട്ടം ഘട്ടമായി കണക്കാക്കാം."],
+		"coding": ["ശരി, ഇത് പരിഹരിക്കാം.", "അങ്ങനെ ചെയ്യാം, കോഡോടെ വിശദീകരിക്കാം."],
+		"search": ["ശരി, ഞാൻ അത് തിരഞ്ഞ് പറയുന്നു.", "അങ്ങനെ ചെയ്യാം, വിവരങ്ങൾ കണ്ടെത്തി പറയുന്നു."],
 		"thanks": ["സ്വാഗതം!", "സഹായിക്കാൻ സന്തോഷം!"],
 		"goodbye": ["വീണ്ടും കാണാം!", "ശ്രദ്ധിക്കുക!"],
 		"apology": ["പ്രശ്നമില്ല."],
@@ -489,17 +503,17 @@ LANGUAGE_PREFACES = {
 		"greeting": ["مرحبًا!", "أهلًا!"],
 		"smalltalk": ["سعيد بسماع ذلك.", "هذا جميل.", "رائع."],
 		"appreciation": ["ممتاز!", "رائع جدًا.", "سعيد بذلك."],
-		"generic": ["حسنًا.", "تمام."],
-		"answer": ["إليك الإجابة.", "دعني أوضح."],
-		"story": ["إليك قصة.", "كان يا ما كان..."],
+		"generic": ["حسنًا، سأساعدك في ذلك.", "تمام، دعنا نراجع هذا معًا."],
+		"answer": ["حسنًا، إليك الإجابة.", "تمام، سأوضح لك الأمر بشكل واضح."],
+		"story": ["حسنًا، لنبدأ القصة.", "رائع، سأحكي لك قصة الآن."],
 		"poem": ["إليك قصيدة.", "أتمنى أن تنال إعجابك."],
-		"weather": ["دعني أتحقق من الطقس.", "إليك تحديث الطقس."],
-		"news": ["إليك آخر الأخبار.", "لنلق نظرة."],
-		"camera": ["أفتح الكاميرا الآن.", "دعني أرى."],
-		"translation": ["إليك الترجمة."],
-		"math": ["دعنا نحسب ذلك."],
-		"coding": ["دعنا نحل ذلك.", "إليك الكود."],
-		"search": ["أبحث عن ذلك."],
+		"weather": ["حسنًا، سأتفقد حالة الطقس الآن.", "تمام، إليك تحديث الطقس."],
+		"news": ["حسنًا، إليك آخر الأخبار.", "تمام، دعنا نرى ما الجديد."],
+		"camera": ["حسنًا، سأفتح الكاميرا الآن.", "تمام، دعني أنظر وأخبرك."],
+		"translation": ["حسنًا، إليك الترجمة.", "تمام، سأترجم ذلك لك بوضوح."],
+		"math": ["حسنًا، دعنا نحسب ذلك.", "تمام، سأحسبها خطوة بخطوة."],
+		"coding": ["حسنًا، دعنا نحل ذلك.", "تمام، سأشرح لك الحل مع الكود."],
+		"search": ["حسنًا، سأبحث عن ذلك الآن.", "تمام، سأجمع لك التفاصيل."],
 		"thanks": ["على الرحب والسعة!", "سعيد بمساعدتك!"],
 		"goodbye": ["إلى اللقاء!", "اعتنِ بنفسك!"],
 		"apology": ["لا بأس."],

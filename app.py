@@ -18,15 +18,8 @@ class Tarz:
 
     FOLLOWUP_TOKENS = {
         "also", "add", "include", "more", "continue", "next",
-        "flight", "flights", "airfare", "ticket", "tickets",
-        "hotel", "stay", "budget", "cost", "price",
-        "trip", "travel", "itinerary",
-    }
-
-    TRAVEL_TOKENS = {
-        "trip", "travel", "itinerary", "day", "days",
-        "flight", "flights", "airfare", "ticket", "tickets",
-        "hotel", "stay", "mumbai", "bombay",
+        "too", "and", "plus", "then", "after", "another",
+        "details", "options", "examples", "price", "cost", "budget",
     }
 
     TASK_KEYWORDS = {
@@ -46,7 +39,8 @@ class Tarz:
 
     SOCIAL_TOKENS = {
         "hi", "hello", "hey", "namaste", "नमस्ते", "नमस्कार",
-        "hii", "heyy", "yo", "thanks", "thank", "wow", "great",
+        "hii", "heyy", "yo", "ok", "okay", "thanks", "thank", "wow", "great",
+        "thik", "theek", "ठीक",
         "నమస్కారం", "హాయ్", "ధన్యవాదాలు", "బాగుంది",
         "നമസ്കാരം", "ഹലോ", "നന്ദി",
         "مرحبا", "أهلا", "شكرا",
@@ -119,7 +113,10 @@ class Tarz:
             return False
 
         category_keywords = {
-            "greeting": {"hello", "hi", "hey", "namaste", "नमस्ते", "నమస్కారం", "നമസ്കാരം", "مرحبا"},
+            "greeting": {
+                "hello", "hi", "hey", "heymate", "mate", "wassup", "wassupp", "whatsup", "sup",
+                "namaste", "नमस्ते", "నమస్కారం", "നമസ്കാരം", "مرحبا",
+            },
             "smalltalk": {
                 "how are you", "what about you", "i am good", "i'm good", "im good", "fine",
                 "कैसे हो", "मैं ठीक हूँ", "आप कैसे हैं", "నేను బాగున్నా", "మీరు ఎలా ఉన్నారు",
@@ -152,10 +149,29 @@ class Tarz:
         }
 
         category = "generic"
-        for key, words in category_keywords.items():
-            if has_any(words):
-                category = key
-                break
+        if Tarz._is_social_turn(text):
+            if has_any({
+                "hello", "hi", "hey", "heymate", "mate", "wassup", "wassupp", "whatsup", "sup",
+                "namaste", "नमस्ते", "నమస్కారం", "നമസ്കാരം", "مرحبا", "أهلا",
+            }):
+                category = "greeting"
+            elif has_any({"thanks", "thank you", "धन्यवाद", "ధన్యవాదాలు", "നന്ദി", "شكرا"}):
+                category = "thanks"
+            elif has_any({
+                "wow", "great", "awesome", "nice", "super", "cool", "excellent",
+                "बहुत बढ़िया", "शानदार", "वाह",
+                "చాలా బాగుంది", "బాగుంది", "సూపర్", "అద్భుతం",
+                "വളരെ നല്ലത്", "അടിപൊളി",
+                "رائع", "ممتاز", "مذهل",
+            }):
+                category = "appreciation"
+            else:
+                category = "smalltalk"
+        else:
+            for key, words in category_keywords.items():
+                if has_any(words):
+                    category = key
+                    break
 
         task_to_category = {
             "story": "story",
@@ -200,10 +216,19 @@ class Tarz:
         }
         if not source:
             return defaults.get(language, defaults["en"])
+
+        min_words = max(2, int(getattr(config, "TTS_PREFACE_MIN_WORDS", 2)))
+        pacing = str(getattr(config, "TTS_PREFACE_PACING", "normal")).lower()
+        if pacing == "slow":
+            paced = [candidate for candidate in source if len(candidate.strip().split()) >= min_words]
+            if paced:
+                source = paced
+
         if config.TTS_CONTEXT_PREFACE_RANDOM and len(candidates) > 1:
             selected = random.choice(source)
         else:
             selected = source[0]
+
         return selected
 
     @staticmethod
@@ -215,9 +240,16 @@ class Tarz:
         if intent in ("VISION", "OCR"):
             return "camera"
 
+        tokens = set(re.findall(r"[a-zA-Z]+|[\u0900-\u097f]+|[\u0c00-\u0c7f]+|[\u0d00-\u0d7f]+|[\u0600-\u06ff]+", text))
+
         for task, words in Tarz.TASK_KEYWORDS.items():
-            if any(word in text for word in words):
-                return task
+            for word in words:
+                token = word.lower()
+                if " " in token:
+                    if token in text:
+                        return task
+                elif token in tokens:
+                    return task
 
         return None
 
@@ -242,6 +274,15 @@ class Tarz:
             return True
         social_phrases = {
             "how are you", "what about you", "i am good", "i'm good", "im good",
+            "me bhi", "mein bhi", "main bhi", "mai bhi", "me too", "same here",
+            "me bhi thik", "mein bhi thik", "main bhi thik", "main bhi theek", "i am fine too",
+            "में भी", "में भी ठीक", "मैं भी", "मैं भी ठीक", "मैं भी ठीक हूँ",
+            "bahut badiya", "bahut badhiya", "bahut badia", "बहुत बढ़िया", "बहुत बढिया",
+            "chaala bagundi", "chala bagundi", "చాలా బాగుంది",
+            "valare nannayi", "വളരെ നല്ലത്",
+            "mumtaz", "ممتاز", "رائع",
+            "heymate", "wassup", "wassupp", "whatsup",
+            "ok", "okay", "alright",
         }
         return any(phrase in lowered for phrase in social_phrases)
 
@@ -265,29 +306,9 @@ class Tarz:
         if detected_task is not None:
             return text
 
-        history = self.llm.memory.messages()
-        previous_user = next((m["content"] for m in reversed(history) if m.get("role") == "user"), "")
-        previous_assistant = next((m["content"] for m in reversed(history) if m.get("role") == "assistant"), "")
-        previous_context = f"{previous_user} {previous_assistant}".lower()
-
-        is_terse = len(lowered.split()) <= 4
         has_followup_signal = any(token in lowered for token in self.FOLLOWUP_TOKENS)
-        travel_context = any(token in previous_context for token in self.TRAVEL_TOKENS)
 
-        if (
-            previous_task == "travel"
-            and travel_context
-            and (is_terse or has_followup_signal)
-            and detected_task is None
-        ):
-            return (
-                "Continue the previous travel-planning task. "
-                f"User follow-up: {text}. "
-                "Do not switch to story or poem. "
-                "Give practical travel details only."
-            )
-
-        if previous_task and self._is_terse_followup(text) and detected_task is None:
+        if previous_task and detected_task is None and (self._is_terse_followup(text) or has_followup_signal):
             return (
                 f"Continue the previous {previous_task} task. "
                 f"User follow-up: {text}. "
@@ -436,18 +457,6 @@ class Tarz:
             print("Camera analysis is unavailable with the configured text-only model.")
 
         # ---- LLM streaming -> sentence buffering -> TTS streaming ----
-        self.tts.start_turn()
-        self.tts.set_language(language)
-        barge_in_stop = threading.Event()
-        barge_in_listener = None
-        print("Press ENTER to interrupt Tarz and ask your next question.")
-        barge_in_listener = threading.Thread(
-            target=self._watch_for_barge_in,
-            args=(barge_in_stop,),
-            daemon=True,
-        )
-        barge_in_listener.start()
-
         stream_state = {"printed": False}
         context_preface = None
         if config.TTS_CONTEXT_PREFACE_ENABLED:
@@ -458,7 +467,9 @@ class Tarz:
             detected_task=detected_task,
             language=language,
         )
-        use_lead_words = config.TTS_LEAD_WORDS_IMMEDIATE and not bool(context_preface)
+        # Keep lead-word streaming enabled even with a spoken preface so
+        # generation can overlap and avoid a noticeable gap after filler.
+        use_lead_words = config.TTS_LEAD_WORDS_IMMEDIATE
 
         token_queue = queue.Queue()
         stream_done = object()
@@ -480,6 +491,18 @@ class Tarz:
 
         producer_thread = threading.Thread(target=produce_tokens, daemon=True)
         producer_thread.start()
+
+        self.tts.start_turn()
+        self.tts.set_language(language)
+        barge_in_stop = threading.Event()
+        barge_in_listener = None
+        print("Press ENTER to interrupt Tarz and ask your next question.")
+        barge_in_listener = threading.Thread(
+            target=self._watch_for_barge_in,
+            args=(barge_in_stop,),
+            daemon=True,
+        )
+        barge_in_listener.start()
 
         def queued_tokens():
             while True:
@@ -604,81 +627,87 @@ class Tarz:
 
         while True:
 
-            request_start = self.tracing.now()
-            with self.tracing.turn_attributes():
-                with self.tracing.start_turn("", None, "VOICE", "voice") as turn:
-                    with self.tracing.start_step(
-                        "VAD",
-                        metadata={"audio_included_in_trace": False},
-                    ) as recording:
-                        audio, vad_metrics = self.mic.listen(return_metrics=True)
-                        audio_seconds = len(audio) / config.SAMPLE_RATE
-                        self.tracing.update_step(
-                            recording,
-                            output={
+            try:
+
+                request_start = self.tracing.now()
+                with self.tracing.turn_attributes():
+                    with self.tracing.start_turn("", None, "VOICE", "voice") as turn:
+                        with self.tracing.start_step(
+                            "VAD",
+                            metadata={"audio_included_in_trace": False},
+                        ) as recording:
+                            audio, vad_metrics = self.mic.listen(return_metrics=True)
+                            audio_seconds = len(audio) / config.SAMPLE_RATE
+                            self.tracing.update_step(
+                                recording,
+                                output={
+                                    "audio_duration_seconds": round(audio_seconds, 3),
+                                    **vad_metrics,
+                                },
+                            )
+
+                        with self.tracing.start_step(
+                            "STT",
+                            metadata={
+                                "engine": "faster-whisper",
+                                "model": config.WHISPER_SIZE,
+                                "beam_size": config.WHISPER_BEAM_SIZE,
+                                "compute_type": config.WHISPER_COMPUTE,
                                 "audio_duration_seconds": round(audio_seconds, 3),
-                                **vad_metrics,
+                                "audio_included_in_trace": False,
+                                "partial_transcript_supported": False,
+                            },
+                        ) as transcription:
+                            decode_hint = None
+                            if config.STT_PREFER_PREVIOUS_LANGUAGE_HINT:
+                                previous_language = self.llm.memory.get_language()
+                                if previous_language in config.STT_ALLOWED_LANGUAGES and previous_language != "en":
+                                    decode_hint = previous_language
+
+                            result = self.stt.transcribe(audio, language=decode_hint)
+                            self.tracing.update_step(
+                                transcription,
+                                output={
+                                    "text": result["text"],
+                                    "language": result["language"],
+                                    "confidence": result["confidence"],
+                                    "first_segment_ms": result["first_segment_ms"],
+                                    "transcript_length": len(result["text"]),
+                                    "latency_ms": result["latency_ms"],
+                                },
+                            )
+
+                        if self._return_to_menu_requested(result["text"]):
+                            print("Returning to mode selection...")
+                            self.tracing.record_event(turn, "Conversation Ended", {"returned_to_menu": True})
+                            self.tracing.flush()
+                            return
+
+                        self.process(
+                            result["text"],
+                            stt_language_hint=result["language"],
+                            stt_language_confidence=result["confidence"],
+                            turn=turn,
+                            input_mode="voice",
+                            request_start=request_start,
+                            pipeline_metrics={
+                                "vad": vad_metrics,
+                                "stt_latency_ms": result["latency_ms"],
                             },
                         )
 
-                    with self.tracing.start_step(
-                        "STT",
-                        metadata={
-                            "engine": "faster-whisper",
-                            "model": config.WHISPER_SIZE,
-                            "beam_size": config.WHISPER_BEAM_SIZE,
-                            "compute_type": config.WHISPER_COMPUTE,
-                            "audio_duration_seconds": round(audio_seconds, 3),
-                            "audio_included_in_trace": False,
-                            "partial_transcript_supported": False,
-                        },
-                    ) as transcription:
-                        decode_hint = None
-                        if config.STT_PREFER_PREVIOUS_LANGUAGE_HINT:
-                            previous_language = self.llm.memory.get_language()
-                            if previous_language in config.STT_ALLOWED_LANGUAGES:
-                                decode_hint = previous_language
-
-                        result = self.stt.transcribe(audio, language=decode_hint)
-                        self.tracing.update_step(
-                            transcription,
-                            output={
-                                "text": result["text"],
-                                "language": result["language"],
-                                "confidence": result["confidence"],
-                                "first_segment_ms": result["first_segment_ms"],
-                                "transcript_length": len(result["text"]),
-                                "latency_ms": result["latency_ms"],
-                            },
+                        self.tracing.record_event(
+                            turn,
+                            "Conversation Ended",
+                            {"response_completed": True},
                         )
 
-                    if self._return_to_menu_requested(result["text"]):
-                        print("Returning to mode selection...")
-                        self.tracing.record_event(turn, "Conversation Ended", {"returned_to_menu": True})
-                        self.tracing.flush()
-                        return
+                self.tracing.flush()
 
-                    self.process(
-                        result["text"],
-                        stt_language_hint=result["language"],
-                        stt_language_confidence=result["confidence"],
-                        turn=turn,
-                        input_mode="voice",
-                        request_start=request_start,
-                        pipeline_metrics={
-                            "vad": vad_metrics,
-                            "stt_latency_ms": result["latency_ms"],
-                        },
-                    )
-
-                    self.tracing.record_event(
-                        turn,
-                        "Conversation Ended",
-                        {"response_completed": True},
-                    )
-
-
-            self.tracing.flush()
+            except KeyboardInterrupt:
+                print("\nVoice mode interrupted. Returning to mode selection...")
+                self.tracing.flush()
+                return
 
     def run_text(self):
 

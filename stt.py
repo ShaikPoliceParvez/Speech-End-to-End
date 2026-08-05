@@ -228,6 +228,7 @@ class STT:
 
         detected_language = getattr(info, "language", None)
         script = self.detect_script(text)
+        roman_language = self._roman_language(text) if script == "latin" else None
         script_mismatch = not self._transcript_matches_language(text, detected_language)
 
         # Fast path: keep first-pass output when it is already usable, because
@@ -237,10 +238,8 @@ class STT:
             detected_language in STT_ALLOWED_LANGUAGES
             and bool(text)
             and not self._is_suspicious_text(text)
-            and (
-                self._transcript_matches_language(text, detected_language)
-                or script in ("latin", "mixed")
-            )
+            and self._transcript_matches_language(text, detected_language)
+            and (script != "latin" or roman_language in (None, detected_language))
         )
 
         # Retry only for strong failure signals.
@@ -267,6 +266,13 @@ class STT:
             # Narrow candidates by script so we do 1 decode instead of all 5.
             if script == "devanagari":
                 candidates = ("en", "hi")  # Devanagari is unambiguously Hindi/Urdu
+            elif roman_language in STT_ALLOWED_LANGUAGES:
+                # Roman-script evidence is a strong disambiguator for Hinglish,
+                # Roman Telugu/Malayalam, and Arabizi.
+                if roman_language == "hi":
+                    candidates = ("hi", "en")
+                else:
+                    candidates = (roman_language, "en")
             elif detected_language == "hi":
                 candidates = ("en", "hi")  # Hinglish (Latin) is the only real Hindi/English confusion
             elif script == "telugu":

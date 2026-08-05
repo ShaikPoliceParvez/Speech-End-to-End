@@ -8,7 +8,15 @@ import time
 from PIL import Image
 
 from memory import Memory
-from config import SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE, LLM_MODEL, LLM_MAX_TOKENS
+from config import (
+    SUPPORTED_LANGUAGES,
+    DEFAULT_LANGUAGE,
+    LLM_MODEL,
+    LLM_MAX_TOKENS,
+    LLM_SOCIAL_MAX_TOKENS,
+    LLM_HISTORY_MODE,
+    LLM_HISTORY_TURNS,
+)
 
 
 def _is_telugu_character(character):
@@ -100,6 +108,46 @@ class LLM:
             # Warmup is best-effort and should never block startup.
             pass
 
+    @staticmethod
+    def _history_explicitly_requested(prompt):
+        text = (prompt or "").strip().lower()
+        if not text:
+            return False
+
+        if "continue the previous" in text or "user follow-up:" in text:
+            return True
+
+        memory_keywords = {
+            "remember", "recall", "previous", "earlier", "as i said", "as mentioned",
+            "before", "last message", "our last", "continue from",
+            "याद", "पहले", "जैसा मैंने कहा",
+            "గత", "ముందు", "గుర్తు", "ముందు చెప్పిన",
+            "മുമ്പ്", "ഓർമ്മ", "മുന്‍പ്",
+            "تذكر", "السابق", "قبل", "كما قلت",
+        }
+        return any(keyword in text for keyword in memory_keywords)
+
+    @staticmethod
+    def _is_social_or_compliment_turn(prompt):
+        text = (prompt or "").strip().lower()
+        if not text:
+            return False
+
+        # Do not classify explicit task requests as social turns.
+        task_markers = {"story", "poem", "plan", "trip", "flight", "code", "math", "translate"}
+        if any(marker in text for marker in task_markers):
+            return False
+
+        keywords = {
+            "hi", "hello", "hey", "how are you", "what about you", "i am good", "i'm good", "im good",
+            "wow", "great", "awesome", "nice", "cool", "thanks", "thank you", "good job",
+            "bahut badiya", "bahut badhiya", "bahut badia", "बहुत बढ़िया", "बहुत बढिया",
+            "chaala bagundi", "chala bagundi", "చాలా బాగుంది", "బాగుంది",
+            "valare nannayi", "വളരെ നല്ലത്",
+            "mumtaz", "ممتاز", "رائع", "شكرا",
+        }
+        return any(keyword in text for keyword in keywords)
+
     def measure_model_startup(self):
         """Measure Ollama model readiness without generating a response."""
         start = time.perf_counter()
@@ -147,6 +195,8 @@ class LLM:
         language=None,
         allow_roman_output=False,
     ):
+
+        social_turn = self._is_social_or_compliment_turn(prompt)
 
         lang = (language or self.memory.get_language() or DEFAULT_LANGUAGE).lower()
         if lang not in SUPPORTED_LANGUAGES:
@@ -267,28 +317,42 @@ class LLM:
                 "Never translate unless the user explicitly asks for translation."
             )
 
-        # Keep simple answers concise, but let creative requests have enough
-        # room to feel complete rather than ending after an acknowledgement.
-        system_instruction += (
-            " Keep simple factual answers short, clear, and complete. "
-            "Use grammatically correct, natural native phrasing for the selected language in every reply. "
-            "For greetings and small-talk (for example: hi, hello, how are you), respond in 1-2 short natural conversational sentences. "
-            "Do not use literal translated grammar or broken forms. "
-            "Examples of desired tone: Telugu -> 'నేను బాగున్నాను. మీరు ఎలా ఉన్నారు?'; Hindi -> 'मैं ठीक हूँ। आप कैसे हैं?'. "
-            "For the ENTIRE response, keep every sentence fluent and native in grammar, word order, and idiom. "
-            "Do not mix languages unless the user explicitly asks for mixed output. "
-            "Do not mirror user typos or malformed grammar; correct them and answer naturally. "
-            "Before finishing, self-check that the whole reply reads like a native speaker wrote it. "
-            "Always prioritize the user's current message over prior creative context. "
-            "If the current user message is a follow-up (for example: also, add this, include flights, for the trip), continue the same task directly. "
-            "Do not switch to stories, poems, or fictional content unless the CURRENT user message explicitly asks for a story or poem. "
-            "When the user requests a story, begin the story immediately instead of only confirming that you can tell one. "
-            "Write a complete short story with a beginning, development, and ending in several short paragraphs. "
-            "For numbered plans, use consecutive numbers exactly once and put "
-            "each item on its own line. For an N-day itinerary, provide Day 1 "
-            "through Day N without skipping or repeating days. Do not output a "
-            "number by itself, and do not invent uncertain place names. "
-        )
+        if social_turn:
+            # Keep social-turn instructions compact to reduce TTFT for greetings.
+            system_instruction += (
+                "You are Tarz. Never claim your name is anything else. "
+                "Reply naturally in the selected language in 1-2 short conversational sentences. "
+                "Do not continue any previous story or task context unless explicitly asked. "
+                "Keep it under about 35 words and avoid literal translation artifacts. "
+            )
+        else:
+            # Keep simple answers concise, but let creative requests have enough
+            # room to feel complete rather than ending after an acknowledgement.
+            system_instruction += (
+                "You are Tarz. Never claim your name is anything else. "
+                " Keep simple factual answers short, clear, and complete. "
+                "Use grammatically correct, natural native phrasing for the selected language in every reply. "
+                "For greetings and small-talk (for example: hi, hello, how are you), respond in 1-2 short natural conversational sentences. "
+                "Do not use literal translated grammar or broken forms. "
+                "Examples of desired tone: Telugu -> 'నేను బాగున్నాను. మీరు ఎలా ఉన్నారు?'; Hindi -> 'मैं ठीक हूँ। आप कैसे हैं?'. "
+                "For the ENTIRE response, keep every sentence fluent and native in grammar, word order, and idiom. "
+                "Do not mix languages unless the user explicitly asks for mixed output. "
+                "Do not mirror user typos or malformed grammar; correct them and answer naturally. "
+                "Before finishing, self-check that the whole reply reads like a native speaker wrote it. "
+                "For practical tasks (planning, recommendations, translation, search-style help), provide concrete and useful details, not just a short acknowledgement. "
+                "If the request is underspecified, ask exactly one concise clarifying question. "
+                "Do not bring in previous conversation details unless the user explicitly asks to continue or recall earlier context. "
+                "If the current message is only a greeting, compliment, or acknowledgement, reply briefly and naturally, and do not continue prior stories or tasks. "
+                "Always prioritize the user's current message over prior creative context. "
+                "If the current user message is a follow-up (for example: also, add this, include flights, for the trip), continue the same task directly. "
+                "Do not switch to stories, poems, or fictional content unless the CURRENT user message explicitly asks for a story or poem. "
+                "When the user requests a story, begin the story immediately instead of only confirming that you can tell one. "
+                "Write a complete short story with a beginning, development, and ending in several short paragraphs. "
+                "For numbered plans, use consecutive numbers exactly once and put "
+                "each item on its own line. For an N-day itinerary, provide Day 1 "
+                "through Day N without skipping or repeating days. Do not output a "
+                "number by itself, and do not invent uncertain place names. "
+            )
 
         messages = [{
             "role": "system",
@@ -296,7 +360,24 @@ class LLM:
         }]
         history = self.memory.messages().copy()
         current_message = history.pop()
-        messages.extend(history)
+        include_history = LLM_HISTORY_MODE == "full"
+        if LLM_HISTORY_MODE == "strict":
+            include_history = self._history_explicitly_requested(prompt)
+
+        if include_history:
+            window = max(0, int(LLM_HISTORY_TURNS)) * 2
+            if window > 0:
+                messages.extend(history[-window:])
+
+        if self._is_social_or_compliment_turn(prompt):
+            messages.append({
+                "role": "system",
+                "content": (
+                    "This user message is a greeting/compliment/acknowledgement. "
+                    "Reply in 1-2 short natural sentences only. "
+                    "Do not continue previous story/task context unless user explicitly asks to continue."
+                ),
+            })
         # Keep the active turn's language closest to the current request so
         # previous Hindi or Telugu replies cannot pull a new English turn into
         # the wrong output language.
@@ -349,7 +430,9 @@ class LLM:
                 model=self.model,
                 messages=messages,
                 stream=True,
-                options={"num_predict": LLM_MAX_TOKENS},
+                options={
+                    "num_predict": min(LLM_SOCIAL_MAX_TOKENS, LLM_MAX_TOKENS) if social_turn else LLM_MAX_TOKENS,
+                },
             )
 
             for chunk in response:
