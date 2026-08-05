@@ -75,6 +75,13 @@ class Speaker:
             "pa": "pa",
             "ur": "ur",
         }
+        self.digit_word_map = {
+            "en": {"0": "zero", "1": "one", "2": "two", "3": "three", "4": "four", "5": "five", "6": "six", "7": "seven", "8": "eight", "9": "nine"},
+            "hi": {"0": "शून्य", "1": "एक", "2": "दो", "3": "तीन", "4": "चार", "5": "पांच", "6": "छह", "7": "सात", "8": "आठ", "9": "नौ"},
+            "te": {"0": "సున్నా", "1": "ఒకటి", "2": "రెండు", "3": "మూడు", "4": "నాలుగు", "5": "ఐదు", "6": "ఆరు", "7": "ఏడు", "8": "ఎనిమిది", "9": "తొమ్మిది"},
+            "ml": {"0": "പൂജ്യം", "1": "ഒന്ന്", "2": "രണ്ട്", "3": "മൂന്ന്", "4": "നാല്", "5": "അഞ്ച്", "6": "ആറ്", "7": "ഏഴ്", "8": "എട്ട്", "9": "ഒമ്പത്"},
+            "ar": {"0": "صفر", "1": "واحد", "2": "اثنان", "3": "ثلاثة", "4": "أربعة", "5": "خمسة", "6": "ستة", "7": "سبعة", "8": "ثمانية", "9": "تسعة"},
+        }
 
         threading.Thread(
             target=self._synth_worker,
@@ -267,6 +274,23 @@ class Speaker:
     def _expand_numbers(self, text, language):
         lang = (language or DEFAULT_LANGUAGE).lower()
         num_lang = self.num2words_lang_map.get(lang, "en")
+        digit_words = self.digit_word_map.get(lang, self.digit_word_map["en"])
+
+        def digit_fallback(value):
+            # Preserve mixed-script digit input by converting each digit to
+            # its language-specific spoken form when full number conversion
+            # is unavailable.
+            spoken_digits = []
+            for character in value:
+                if character.isdigit():
+                    try:
+                        normalized = str(int(character))
+                    except Exception:
+                        normalized = character
+                    spoken_digits.append(digit_words.get(normalized, normalized))
+                else:
+                    spoken_digits.append(character)
+            return " ".join(spoken_digits)
 
         def convert(match):
             value = match.group(0)
@@ -276,8 +300,8 @@ class Speaker:
             except Exception:
                 pass
 
-            # Fallback: keep original if conversion backend is unavailable.
-            return value
+            # Fallback: at least pronounce each digit in the active language.
+            return digit_fallback(value)
 
         return re.sub(r"\b\d+\b", convert, text)
 

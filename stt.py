@@ -17,6 +17,7 @@ from config import (
     WHISPER_MALAYALAM_PROMPT,
     WHISPER_ARABIC_PROMPT,
     WHISPER_LANGUAGE_CONFIDENCE_HIGH,
+    STT_RETRY_ON_LOW_CONFIDENCE,
     STT_ALLOWED_LANGUAGES,
     DEFAULT_LANGUAGE,
     HINDI_ROMAN_CORE_WORDS,
@@ -229,20 +230,31 @@ class STT:
         script = self.detect_script(text)
         script_mismatch = not self._transcript_matches_language(text, detected_language)
 
-        # A second decode is expensive, so it is reserved for low-confidence,
-        # unsupported, script-mismatched, Arabic/Persian, or empty results.
-        # Hindi and Telugu both get the "unknown script" check: a hi/te
-        # detection that produced no native/Latin script at all (e.g. only
-        # digits or punctuation) is just as broken for either language.
+        # Fast path: keep first-pass output when it is already usable, because
+        # a second decode is expensive and is the main source of latency for
+        # multilingual turns.
+        first_pass_usable = (
+            detected_language in STT_ALLOWED_LANGUAGES
+            and bool(text)
+            and not self._is_suspicious_text(text)
+            and (
+                self._transcript_matches_language(text, detected_language)
+                or script in ("latin", "mixed")
+            )
+        )
+
+        # Retry only for strong failure signals.
         needs_retry = (
             language is None
-            and detected_language != "en"
+            and not first_pass_usable
             and (
-                getattr(info, "language_probability", 0.0) < WHISPER_LANGUAGE_CONFIDENCE_HIGH
+                (
+                    STT_RETRY_ON_LOW_CONFIDENCE
+                    and getattr(info, "language_probability", 0.0) < WHISPER_LANGUAGE_CONFIDENCE_HIGH
+                )
                 or
                 detected_language not in STT_ALLOWED_LANGUAGES
                 or script_mismatch
-                or script == "arabic"
                 or self._is_suspicious_text(text)
                 or (
                     detected_language in ("hi", "te")

@@ -43,6 +43,38 @@ def _filter_telugu_token(token, parenthetical_depth):
     return result, parenthetical_depth
 
 
+def _is_hindi_character(character):
+    return "\u0900" <= character <= "\u097F"
+
+
+def _filter_hindi_token(token, parenthetical_depth):
+    """Remove non-Hindi additions while keeping streamed Hindi readable."""
+    filtered = []
+    for character in token:
+        if character in "([{":
+            parenthetical_depth += 1
+            continue
+        if character in ")]}":
+            parenthetical_depth = max(0, parenthetical_depth - 1)
+            continue
+        if parenthetical_depth:
+            continue
+        if (
+            _is_hindi_character(character)
+            or character.isspace()
+            or character.isdigit()
+            or character in ".,!?;:।…-–—"
+            or ord(character) >= 0x1F000
+        ):
+            filtered.append(character)
+
+    result = "".join(filtered)
+    result = re.sub(r"\s*[-–—]\s*", " ", result)
+    result = re.sub(r"\s+([.,!?;:।])", r"\1", result)
+    result = re.sub(r"([.,!?;:।])\s*(?=[.,!?;:।])", r"\1", result)
+    return result, parenthetical_depth
+
+
 class LLM:
 
     def __init__(self, model=None, tracer=None):
@@ -54,6 +86,19 @@ class LLM:
         self.last_metrics = {}
         self.model_startup_metrics = None
         self._first_request = True
+
+    def warmup(self):
+        """Issue a tiny request so the first user turn starts faster."""
+        try:
+            ollama.chat(
+                model=self.model,
+                messages=[{"role": "user", "content": "hi"}],
+                stream=False,
+                options={"num_predict": 1},
+            )
+        except Exception:
+            # Warmup is best-effort and should never block startup.
+            pass
 
     def measure_model_startup(self):
         """Measure Ollama model readiness without generating a response."""
@@ -148,13 +193,20 @@ class LLM:
                 )
             else:
                 system_instruction = (
-                    "The user's conversation language is Hindi. "
-                    "The user may type in Roman Hindi, but input is normalized before you receive it. "
-                    "Always respond ONLY in proper Hindi using Devanagari script. "
-                    "Do NOT respond in Arabic, Urdu, Persian, or any other script under any circumstances. "
-                    "Even if the user's name sounds Arabic or Persian, respond exclusively in Hindi Devanagari. "
-                    "Never respond in Hinglish unless the user explicitly requests Hinglish. "
-                    "Never translate unless the user explicitly asks for translation."
+                    "The user's conversation language is Hindi.\n"
+                    "The user may type in Roman Hindi, but input is normalized before you receive it.\n\n"
+                    "STRICT OUTPUT RULES — no exceptions:\n"
+                    "1. Always respond ONLY in standard Hindi (Khari Boli / Modern Standard Hindi).\n"
+                    "2. Use Devanagari script. Every word must be Hindi, not Marathi, Bhojpuri, or any other Devanagari language.\n"
+                    "3. Do NOT respond in Marathi under any circumstances. "
+                    "Marathi words like तुमच्या, केलेल्या, आहे, होतो are NOT Hindi — avoid them completely.\n"
+                    "4. Do NOT respond in Arabic, Urdu, Persian, or any other script.\n"
+                    "5. Do NOT respond in Hinglish unless the user explicitly requests it.\n"
+                    "6. Never translate unless the user explicitly asks for translation.\n"
+                    "7. Write natural conversational Hindi as spoken in Delhi / North India.\n"
+                    "8. If user input is mixed, unclear, or Marathi-influenced Devanagari, interpret the meaning and answer in clean Hindi.\n"
+                    "9. Never mirror Marathi grammar endings or function words such as मध्ये, आणि, आहे, होते, पुढे, कडे, वरून.\n"
+                    "10. Keep sentence structure simple and idiomatic Hindi; prefer phrases like 'में', 'और', 'है', 'था/थे', 'अगला'."
                 )
         elif lang == "te":
             system_instruction = (
@@ -168,6 +220,9 @@ class LLM:
                 "atanu, and chanipoyadu; reply in Telugu script.\n"
                 "- If the user specifies a length (for example, 50 words or 100 words), follow it closely.\n"
                 "- Write natural, grammatically correct Telugu.\n"
+                "- For greetings and small talk, use natural Telugu conversational grammar.\n"
+                "  Example style: 'నేను బాగున్నాను. మీరు ఎలా ఉన్నారు?'\n"
+                "- Avoid malformed or literal constructions such as 'నీకు ఎలా ఉన్నాలో?'.\n"
                 "- You can communicate in Telugu. Never claim that you cannot speak or understand Telugu.\n"
                 "- Fulfill ordinary harmless requests, including fictional stories and jokes. "
                 "Do not say that you cannot tell a story.\n"
@@ -216,6 +271,17 @@ class LLM:
         # room to feel complete rather than ending after an acknowledgement.
         system_instruction += (
             " Keep simple factual answers short, clear, and complete. "
+            "Use grammatically correct, natural native phrasing for the selected language in every reply. "
+            "For greetings and small-talk (for example: hi, hello, how are you), respond in 1-2 short natural conversational sentences. "
+            "Do not use literal translated grammar or broken forms. "
+            "Examples of desired tone: Telugu -> 'నేను బాగున్నాను. మీరు ఎలా ఉన్నారు?'; Hindi -> 'मैं ठीक हूँ। आप कैसे हैं?'. "
+            "For the ENTIRE response, keep every sentence fluent and native in grammar, word order, and idiom. "
+            "Do not mix languages unless the user explicitly asks for mixed output. "
+            "Do not mirror user typos or malformed grammar; correct them and answer naturally. "
+            "Before finishing, self-check that the whole reply reads like a native speaker wrote it. "
+            "Always prioritize the user's current message over prior creative context. "
+            "If the current user message is a follow-up (for example: also, add this, include flights, for the trip), continue the same task directly. "
+            "Do not switch to stories, poems, or fictional content unless the CURRENT user message explicitly asks for a story or poem. "
             "When the user requests a story, begin the story immediately instead of only confirming that you can tell one. "
             "Write a complete short story with a beginning, development, and ending in several short paragraphs. "
             "For numbered plans, use consecutive numbers exactly once and put "
@@ -264,6 +330,7 @@ class LLM:
         first_token_ms = None
         is_first_request = self._first_request
         telugu_parenthetical_depth = 0
+        hindi_parenthetical_depth = 0
 
         generation = (
             self.tracer.start_generation(
@@ -295,7 +362,19 @@ class LLM:
                     usage_details["output_tokens"] = chunk["eval_count"]
 
                 token = raw_token
-                if lang == "te":
+                if lang == "hi":
+                    token, hindi_parenthetical_depth = _filter_hindi_token(
+                        raw_token,
+                        hindi_parenthetical_depth,
+                    )
+                    if not token:
+                        continue
+                    if (
+                        not any(_is_hindi_character(character) or character.isdigit() for character in token)
+                        and not any(_is_hindi_character(character) for character in assistant)
+                    ):
+                        continue
+                elif lang == "te":
                     token, telugu_parenthetical_depth = _filter_telugu_token(
                         raw_token,
                         telugu_parenthetical_depth,
@@ -336,6 +415,15 @@ class LLM:
 
             if lang == "te" and not any(_is_telugu_character(character) for character in assistant):
                 assistant = "క్షమించండి, దయచేసి మీ ప్రశ్నను మళ్లీ అడగండి."
+                if first_token_ms is None:
+                    first_token_ms = round((time.perf_counter() - request_start) * 1000, 2)
+                if on_event is not None:
+                    on_event("LLM_FIRST_TOKEN", {"token": assistant})
+                    on_event("LLM_TOKEN", {"token": assistant, "text": assistant})
+                    on_event("LLM_STREAMING", {"token": assistant})
+                yield assistant
+            elif lang == "hi" and not any(_is_hindi_character(character) for character in assistant):
+                assistant = "क्षमा करें, कृपया अपना प्रश्न फिर से पूछें।"
                 if first_token_ms is None:
                     first_token_ms = round((time.perf_counter() - request_start) * 1000, 2)
                 if on_event is not None:
@@ -386,6 +474,14 @@ def sentence_stream(
     max_chars=220,
     max_words=36,
     first_sentence_immediately=False,
+    first_chunk_min_chars=24,
+    first_chunk_min_words=4,
+    first_word_immediately=False,
+    first_sentence_wordwise=False,
+    first_sentence_word_chunk_size=1,
+    chunk_on_minor_punctuation=False,
+    lead_words_immediate=False,
+    lead_words_count=2,
     should_stop=None,
 ):
 
@@ -393,10 +489,41 @@ def sentence_stream(
     pending = ""
     has_emitted = False
     list_marker = ""
+    first_sentence_done = False
+    first_sentence_word_buffer = []
+    lead_words_sent = False
 
-    endings = [".", "!", "?", "।"]
+    major_endings = [".", "!", "?", "।"]
+    minor_endings = [",", ";", ":"] if chunk_on_minor_punctuation else []
+    endings = major_endings + minor_endings
 
-    def push_piece(piece):
+    def emit_chunk(chunk):
+        nonlocal has_emitted
+        chunk = chunk.strip()
+        if not chunk:
+            return None
+        has_emitted = True
+        if on_event is not None:
+            on_event("SENTENCE_READY", {"sentence": chunk})
+            on_event("LLM_SENTENCE_READY", {"sentence": chunk})
+        return chunk
+
+    def emit_word_groups(words, flush=False):
+        nonlocal first_sentence_word_buffer
+        chunk_size = max(1, int(first_sentence_word_chunk_size or 1))
+        for word in words:
+            first_sentence_word_buffer.append(word)
+            if len(first_sentence_word_buffer) >= chunk_size:
+                out = emit_chunk(" ".join(first_sentence_word_buffer))
+                first_sentence_word_buffer = []
+                if out:
+                    yield out
+        if flush and first_sentence_word_buffer:
+            out = emit_chunk(" ".join(first_sentence_word_buffer))
+            first_sentence_word_buffer = []
+            if out:
+                yield out
+    def push_piece(piece, force_emit=False):
         nonlocal pending, has_emitted, list_marker
         piece = piece.strip()
         if not piece:
@@ -419,6 +546,13 @@ def sentence_stream(
 
         chars = len(pending)
         words = len(pending.split())
+
+        # Punctuation boundaries should flush immediately for natural pacing.
+        if force_emit:
+            out = pending
+            pending = ""
+            has_emitted = True
+            return out
 
         if first_sentence_immediately and not has_emitted:
             out = pending
@@ -447,6 +581,51 @@ def sentence_stream(
 
         buffer += token
 
+        # Fast startup: emit a tiny initial phrase (e.g., first 2 words) as
+        # soon as it is stable, then continue with punctuation-based chunks.
+        if lead_words_immediate and not lead_words_sent and not has_emitted:
+            count = max(1, int(lead_words_count or 1))
+            words = buffer.strip().split()
+            has_boundary = bool(buffer) and (buffer[-1].isspace() or buffer[-1] in endings)
+            if len(words) >= count and has_boundary:
+                lead = " ".join(words[:count]).strip()
+                remainder = " ".join(words[count:]).strip()
+                out = emit_chunk(lead)
+                if out:
+                    yield out
+                lead_words_sent = True
+                buffer = remainder
+
+        # Ultra-low-latency start: emit only the first sentence word-by-word.
+        # After the first sentence ends, switch back to normal sentence chunks.
+        if first_sentence_wordwise and not first_sentence_done:
+            while True:
+                end_index = -1
+                for end_char in major_endings:
+                    pos = buffer.find(end_char)
+                    if pos != -1 and (end_index == -1 or pos < end_index):
+                        end_index = pos
+
+                if end_index != -1:
+                    sentence_slice = buffer[:end_index + 1].strip()
+                    buffer = buffer[end_index + 1:].lstrip()
+                    for out in emit_word_groups(sentence_slice.split(), flush=True):
+                        yield out
+                    first_sentence_done = True
+                    break
+
+                match = re.match(r"\s*([^\s]+)\s+(.*)", buffer, flags=re.DOTALL)
+                if not match:
+                    break
+
+                word = match.group(1)
+                buffer = match.group(2)
+                for out in emit_word_groups([word]):
+                    yield out
+
+            if not first_sentence_done:
+                continue
+
         while True:
             index = -1
 
@@ -462,7 +641,7 @@ def sentence_stream(
             buffer = buffer[index + 1:].lstrip()
 
             if sentence:
-                out = push_piece(sentence)
+                out = push_piece(sentence, force_emit=True)
                 if out:
                     if on_event is not None:
                         on_event("SENTENCE_READY", {"sentence": out})
@@ -472,6 +651,39 @@ def sentence_stream(
         cleaned = buffer.strip()
         if cleaned:
             words = len(cleaned.split())
+
+            # For low-latency voice replies, do not wait for punctuation before
+            # emitting the very first chunk when enough text has arrived.
+            if (
+                first_sentence_immediately
+                and not has_emitted
+                and (len(cleaned) >= first_chunk_min_chars or words >= first_chunk_min_words)
+                and buffer[-1].isspace()
+            ):
+                sentence = cleaned
+                buffer = ""
+                out = push_piece(sentence)
+                if out:
+                    if on_event is not None:
+                        on_event("SENTENCE_READY", {"sentence": out})
+                        on_event("LLM_SENTENCE_READY", {"sentence": out})
+                    yield out
+                continue
+
+            # Lowest-latency mode: begin playback after the first stable word.
+            if first_word_immediately and not has_emitted:
+                parts = cleaned.split()
+                if len(parts) >= 1 and (buffer[-1].isspace() or buffer[-1] in endings):
+                    sentence = parts[0]
+                    remainder = cleaned[len(sentence):].lstrip()
+                    buffer = remainder
+                    out = push_piece(sentence)
+                    if out:
+                        if on_event is not None:
+                            on_event("SENTENCE_READY", {"sentence": out})
+                            on_event("LLM_SENTENCE_READY", {"sentence": out})
+                        yield out
+                    continue
 
             # Safety flush for long run-on output without punctuation.
             if len(cleaned) >= max_chars or words >= max_words:

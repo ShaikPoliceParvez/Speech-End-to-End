@@ -1,15 +1,17 @@
 # ========= MODELS =========
 
 STT_MODEL = "whisper"      # whisper | parakeet
-LLM_MODEL = "qwen2.5:1.5b" # qwen2.5:3b, gemma3:4b, qwen2.5:1.5b, gemma2:2b-instruct-q2_K is also available.
-VOICE = "M1" 				 # M1 | M2 | F1 | F2 | F3 | F4 | F5 | F6
+LLM_MODEL = "gemma3:4b" # qwen2.5:3b, gemma3:4b, qwen2.5:1.5b, gemma2:2b-instruct-q2_K is also available.
+VOICE = "F2" 				 # M1 | M2 | F1 | F2 | F3 | F4 | F5 | F6
 
 # ========= LLM RESPONSE LENGTH =========
 
-# Upper bound on generated tokens so long, detailed answers (stories,
-# explanations, step-by-step help) are not truncated by Ollama's default cap.
-# The model still keeps simple answers short via the adaptive-length prompt.
-LLM_MAX_TOKENS = 1024
+# Upper bound on generated tokens. A lower cap improves responsiveness and
+# keeps spoken answers concise for voice-first interactions.
+LLM_MAX_TOKENS = 512
+
+# Warm the model once at startup so first live query has a lower TTFT.
+LLM_WARMUP_ON_STARTUP = True
 
 # ========= LANGUAGE =========
 
@@ -341,6 +343,10 @@ WHISPER_ARABIC_HOTWORDS = (
 # the language, then retries unsupported detections using the default language.
 STT_ALLOWED_LANGUAGES = ("en", "hi", "te", "ml", "ar")
 
+# Use previous conversation language as STT decode hint for faster follow-up
+# turns in multilingual conversations.
+STT_PREFER_PREVIOUS_LANGUAGE_HINT = True
+
 # Pseudo-streaming configuration
 # First partial after 2.0s — ensures Whisper has real speech, not leading silence
 STT_MIN_PARTIAL_SECONDS = 2.0
@@ -366,6 +372,142 @@ TTS_MAX_WORDS = 36
 # Send the first completed LLM sentence to TTS immediately. Later sentences
 # still use the normal buffer to avoid choppy playback.
 TTS_FIRST_SENTENCE_IMMEDIATELY = True
+# Emit the first spoken chunk earlier so voice starts quickly.
+TTS_FIRST_CHUNK_MIN_CHARS = 8
+TTS_FIRST_CHUNK_MIN_WORDS = 1
+# If enabled, start speaking after the first stable word boundary.
+TTS_FIRST_WORD_IMMEDIATELY = True
+# If enabled, stream only the first sentence word-by-word, then continue with
+# normal sentence buffering for smoother natural playback.
+TTS_FIRST_SENTENCE_WORDWISE = False
+# Group the first sentence into small word chunks (2-3) to reduce choppiness
+# while preserving low startup latency.
+TTS_FIRST_SENTENCE_WORD_CHUNK_SIZE = 2
+# If enabled, split TTS chunks on minor punctuation too (comma/semicolon/colon)
+# for more natural pacing and less choppy starts.
+TTS_CHUNK_ON_MINOR_PUNCTUATION = True
+# Start speaking with a tiny initial phrase (1-2 words) before waiting for
+# punctuation boundaries. This lowers perceived latency without full word-wise
+# choppy playback.
+TTS_LEAD_WORDS_IMMEDIATE = True
+TTS_LEAD_WORDS_COUNT = 2
+# Optional short spoken preface before model stream (multilingual + context aware)
+# e.g. "Okay, here is a story for you." then continue generated content.
+TTS_CONTEXT_PREFACE_ENABLED = True
+TTS_CONTEXT_PREFACE_RANDOM = True
+
+LANGUAGE_PREFACES = {
+	"en": {
+		"greeting": ["Hello!", "Hi there!", "Hey!", "Nice to hear from you!"],
+		"smalltalk": ["Glad to hear that.", "Nice!", "That sounds good."],
+		"appreciation": ["Great!", "Awesome.", "Happy to hear that."],
+		"generic": ["Sure.", "Alright.", "Let's see.", "Okay."],
+		"answer": ["Here's what I found.", "Let me explain.", "Certainly.", "Here's the answer."],
+		"story": ["Here's a story for you.", "Once upon a time...", "Let's begin."],
+		"poem": ["Here's a poem.", "I hope you enjoy it."],
+		"weather": ["Let me check.", "Here's the weather update."],
+		"news": ["Here's what's happening.", "Let's take a look."],
+		"camera": ["Opening the camera.", "Let me have a look."],
+		"translation": ["Here's the translation."],
+		"math": ["Let's calculate that."],
+		"coding": ["Let's solve it.", "Here's the code."],
+		"search": ["Looking into that."],
+		"thanks": ["You're welcome!", "Happy to help!"],
+		"goodbye": ["See you soon!", "Take care!"],
+		"apology": ["No worries.", "That's alright."],
+		"confirmation": ["Done.", "Consider it done."],
+		"clarification": ["Could you clarify that?"],
+		"fallback": ["Let me think about that."],
+	},
+	"hi": {
+		"greeting": ["नमस्ते!", "नमस्कार!"],
+		"smalltalk": ["अच्छा लगा सुनकर।", "बहुत बढ़िया।", "यह अच्छा है।"],
+		"appreciation": ["बहुत अच्छा!", "शानदार।", "यह सुनकर खुशी हुई।"],
+		"generic": ["ज़रूर।", "ठीक है।"],
+		"answer": ["बताता हूँ।", "यह रहा उत्तर।"],
+		"story": ["एक कहानी सुनिए।"],
+		"poem": ["यह रही एक कविता।"],
+		"weather": ["मौसम की जानकारी देखता हूँ।"],
+		"news": ["यह रही ताज़ा जानकारी।"],
+		"camera": ["कैमरा खोल रहा हूँ।"],
+		"translation": ["यह रहा अनुवाद।"],
+		"math": ["आइए गणना करते हैं।"],
+		"coding": ["आइए इसे हल करते हैं।"],
+		"search": ["देखता हूँ।"],
+		"thanks": ["कोई बात नहीं!", "खुशी हुई मदद करके!"],
+		"goodbye": ["फिर मिलेंगे!", "अपना ध्यान रखिए।"],
+		"apology": ["कोई बात नहीं।"],
+		"confirmation": ["हो गया।"],
+		"clarification": ["क्या आप थोड़ा और स्पष्ट करेंगे?"],
+		"fallback": ["एक क्षण सोचने दीजिए।"],
+	},
+	"te": {
+		"greeting": ["నమస్కారం! ఎలా ఉన్నారు?", "హాయ్! మీకు ఎలా సహాయం చేయగలను?"],
+		"smalltalk": ["వినడానికి బాగుంది.", "చాలా బాగుంది.", "అది మంచి విషయం."],
+		"appreciation": ["అద్భుతం!", "సూపర్.", "అది విని సంతోషంగా ఉంది."],
+		"generic": ["సరే.", "అలాగే."],
+		"answer": ["ఇది మీకు సమాధానం.", "నేను వివరిస్తాను."],
+		"story": ["మీ కోసం ఒక కథ చెబుతాను.", "ఒకసారి..."],
+		"poem": ["ఇది ఒక కవిత.", "మీకు నచ్చుతుందని ఆశిస్తున్నాను."],
+		"weather": ["వాతావరణం చెక్ చేస్తాను.", "ఇది వాతావరణ సమాచారం."],
+		"news": ["ఇవి తాజా వార్తలు.", "చూడదాం ఏముంది."],
+		"camera": ["కెమెరా తెరిస్తున్నాను.", "ఒక్కసారి చూసేస్తాను."],
+		"translation": ["ఇది అనువాదం."],
+		"math": ["లెక్క చేద్దాం."],
+		"coding": ["దీన్ని పరిష్కరిద్దాం.", "ఇది కోడ్."],
+		"search": ["చూస్తున్నాను."],
+		"thanks": ["స్వాగతం!", "సహాయం చేసినందుకు ఆనందంగా ఉంది!"],
+		"goodbye": ["మళ్లీ కలుద్దాం!", "జాగ్రత్త!"],
+		"apology": ["పర్లేదు."],
+		"confirmation": ["అయింది.", "పూర్తయ్యింది."],
+		"clarification": ["దయచేసి మరింత స్పష్టంగా చెబుతారా?"],
+		"fallback": ["ఒక్కసారి ఆలోచిస్తాను."],
+	},
+	"ml": {
+		"greeting": ["നമസ്കാരം!", "ഹലോ!"],
+		"smalltalk": ["അത് കേട്ട് സന്തോഷം.", "നല്ലതാണ്.", "അത് നല്ല കാര്യമാണ്."],
+		"appreciation": ["വളരെ നല്ലത്!", "അദ്ഭുതം.", "അത് കേട്ട് സന്തോഷം."],
+		"generic": ["ശരി.", "അങ്ങനെ ചെയ്യാം."],
+		"answer": ["ഇതാണ് ഉത്തരम्.", "ഞാൻ വിശദീകരിക്കാം."],
+		"story": ["നിങ്ങൾക്കായി ഒരു കഥ പറയുന്നു.", "ഒരിക്കൽ..."],
+		"poem": ["ഇതാണ് ഒരു കവിത.", "നിങ്ങൾക്ക് ഇഷ്ടപ്പെടുമെന്ന് കരുതുന്നു."],
+		"weather": ["കാലാവസ്ഥ നോക്കാം.", "ഇതാണ് കാലാവസ്ഥ വിവരങ്ങൾ."],
+		"news": ["ഇവയാണ് പുതിയ വാർത്തകൾ.", "ഒന്ന് നോക്കാം."],
+		"camera": ["ക്യാമറ തുറക്കുന്നു.", "ഒന്ന് നോക്കട്ടെ."],
+		"translation": ["ഇതാണ് വിവർത്തനം."],
+		"math": ["കണക്കാക്കാം."],
+		"coding": ["ഇത് പരിഹരിക്കാം.", "ഇതാണ് കോഡ്."],
+		"search": ["നോക്കുന്നു."],
+		"thanks": ["സ്വാഗതം!", "സഹായിക്കാൻ സന്തോഷം!"],
+		"goodbye": ["വീണ്ടും കാണാം!", "ശ്രദ്ധിക്കുക!"],
+		"apology": ["പ്രശ്നമില്ല."],
+		"confirmation": ["കഴിഞ്ഞു.", "ചെയ്തു."],
+		"clarification": ["കുറച്ച് കൂടുതൽ വ്യക്തമാക്കാമോ?"],
+		"fallback": ["ഒരു നിമിഷം ആലോചിക്കാം."],
+	},
+	"ar": {
+		"greeting": ["مرحبًا!", "أهلًا!"],
+		"smalltalk": ["سعيد بسماع ذلك.", "هذا جميل.", "رائع."],
+		"appreciation": ["ممتاز!", "رائع جدًا.", "سعيد بذلك."],
+		"generic": ["حسنًا.", "تمام."],
+		"answer": ["إليك الإجابة.", "دعني أوضح."],
+		"story": ["إليك قصة.", "كان يا ما كان..."],
+		"poem": ["إليك قصيدة.", "أتمنى أن تنال إعجابك."],
+		"weather": ["دعني أتحقق من الطقس.", "إليك تحديث الطقس."],
+		"news": ["إليك آخر الأخبار.", "لنلق نظرة."],
+		"camera": ["أفتح الكاميرا الآن.", "دعني أرى."],
+		"translation": ["إليك الترجمة."],
+		"math": ["دعنا نحسب ذلك."],
+		"coding": ["دعنا نحل ذلك.", "إليك الكود."],
+		"search": ["أبحث عن ذلك."],
+		"thanks": ["على الرحب والسعة!", "سعيد بمساعدتك!"],
+		"goodbye": ["إلى اللقاء!", "اعتنِ بنفسك!"],
+		"apology": ["لا بأس."],
+		"confirmation": ["تم.", "تم التنفيذ."],
+		"clarification": ["هل يمكنك التوضيح أكثر؟"],
+		"fallback": ["دعني أفكر في ذلك."],
+	},
+}
 TTS_PREFETCH_TEXT = 2
 TTS_PREFETCH_AUDIO = 1
 
@@ -394,10 +536,14 @@ TTS_LANGUAGE_BACKENDS = {
 # Silero VAD is used separately inside Whisper (vad_filter=True in stt.py)
 # for audio cleaning before transcription — not for endpoint timing.
 VAD_SILENCE_THRESHOLD = 0.01       # Normalised RMS energy below which a chunk is silent
-VAD_SILENCE_DURATION  = 0.8        # Seconds of continuous silence to declare end-of-speech
+VAD_SILENCE_DURATION  = 0.5        # Seconds of continuous silence to declare end-of-speech
 VAD_MIN_SPEECH_DURATION = 0.3      # Minimum speech before endpoint is considered
-VAD_GRACE_PERIOD = 0.2             # Extra silence buffer to protect short mid-sentence pauses
+VAD_GRACE_PERIOD = 0.12            # Extra silence buffer to protect short mid-sentence pauses
 VAD_MAX_RECORD_SECONDS = 30.0      # Hard cap: force-stop if VAD never fires
+
+# When False, skip expensive second-pass decode on confidence alone and only
+# retry on stronger failure signals (unsupported language/script mismatch/etc.).
+STT_RETRY_ON_LOW_CONFIDENCE = False
 
 # Add custom entries to improve name pronunciation in TTS.
 TTS_PRONUNCIATION_MAP = {

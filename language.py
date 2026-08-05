@@ -237,6 +237,8 @@ _ROMAN_LANGUAGE_VOCABULARY = {
         "oyi", "oi",
         "abba", "ammo", "ayyo",
         "super", "mast", "mastu",
+        "chala", "chaala",
+        "adbhutam", "adbutam", "adbhutham", "adbutham",
         "bagundi", "bagundhi",
         "bagunnava", "bagunnara",
         "bagoledu", "bagaledu",

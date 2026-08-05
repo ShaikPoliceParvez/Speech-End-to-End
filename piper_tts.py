@@ -29,7 +29,7 @@ class PiperSpeaker:
             if self.playback.is_interrupted():
                 break
 
-            sentence = sentence.strip()
+            sentence = self.playback._prepare_text(sentence, language).strip()
             if not sentence:
                 continue
 
