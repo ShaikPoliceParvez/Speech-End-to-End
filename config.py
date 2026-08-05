@@ -85,7 +85,7 @@ TELUGU_ROMAN_CORE_WORDS = {
 	"cheppu", "cheppandi", "chey", "cheyyi", "choodu", "choosi", "kanipistundi", "kavali", "avunu", "kaadu",
 	"ledu", "namaskaram", "dhanyavadalu", "peru", "pairu", "evaru", "eppudu", "enduku", "katha", "vinali", "inko",
 	"ekkada", "ikkada", "akkada", "telugu", "lo", "matladu", "matladandi", "idi", "chaduvu", "rasundi",
-	"namaskaram", "namaste", "ayyo", "aiyyo",
+	"namaskaram", "namaste", "ayyo", "aiyyo", "sare", "sarey",
 }
 
 # Roman-Arabic (Arabizi) core words used to identify Arabic written in Latin script.
@@ -408,16 +408,18 @@ TTS_CONTEXT_PREFACE_RANDOM = True
 # - normal: default preface selection
 # - slow: prefer longer, naturally paced preface variants
 TTS_PREFACE_PACING = "slow"
-TTS_PREFACE_MIN_WORDS = 5
+TTS_PREFACE_MIN_WORDS = 6
 
 LANGUAGE_PREFACES = {
 	"en": {
-		"greeting": ["Hello!", "Hi there!", "Hey!", "Nice to hear from you!"],
+		"greeting": ["Hello. It is really nice to hear from you.", "Hi there. Glad we are speaking right now."],
+		"wellbeing_query": ["Thanks for asking.", "I am doing well, thank you."],
 		"smalltalk": ["Glad to hear that.", "Nice!", "That sounds good."],
 		"appreciation": ["Great!", "Awesome.", "Happy to hear that."],
 		"generic": ["Sure, I can help with that.", "Alright, let me help you.", "Okay, let us go through it."],
 		"answer": ["Sure, here is what I can tell you.", "Certainly, here is the answer.", "Alright, let me explain clearly."],
 		"story": ["Sure, let us begin a story.", "Alright, here comes a story.", "Great, let us start the story."],
+		"joke": ["Here is a joke for you.", "This one should make you smile."],
 		"poem": ["Here's a poem.", "I hope you enjoy it."],
 		"weather": ["Let me check.", "Here's the weather update."],
 		"news": ["Here's what's happening.", "Let's take a look."],
@@ -434,12 +436,14 @@ LANGUAGE_PREFACES = {
 		"fallback": ["Let me think about that."],
 	},
 	"hi": {
-		"greeting": ["नमस्ते!", "नमस्कार!"],
+		"greeting": ["नमस्ते। आपसे फिर बात करके अच्छा लगा।", "नमस्कार। आपकी आवाज़ सुनकर अच्छा लगा।"],
+		"wellbeing_query": ["पूछने के लिए धन्यवाद।", "मैं ठीक हूँ, धन्यवाद।"],
 		"smalltalk": ["अच्छा लगा सुनकर।", "बहुत बढ़िया।", "यह अच्छा है।"],
 		"appreciation": ["बहुत अच्छा!", "शानदार।", "यह सुनकर खुशी हुई।"],
 		"generic": ["ज़रूर, मैं मदद करता हूँ।", "ठीक है, मैं मदद करता हूँ।"],
 		"answer": ["ज़रूर, यह रहा जवाब।", "ठीक है, मैं साफ़-साफ़ बताता हूँ।"],
 		"story": ["नमस्ते, कहानी शुरू करते हैं।"],
+		"joke": ["यह रहा एक मज़ेदार चुटकुला।", "यह चुटकुला आपको पसंद आएगा।"],
 		"poem": ["यह रही एक कविता।"],
 		"weather": ["मौसम की जानकारी देखता हूँ।"],
 		"news": ["यह रही ताज़ा जानकारी।"],
@@ -456,12 +460,14 @@ LANGUAGE_PREFACES = {
 		"fallback": ["एक क्षण सोचने दीजिए।"],
 	},
 	"te": {
-		"greeting": ["నమస్కారం! ఎలా ఉన్నారు?", "హాయ్! మీకు ఎలా సహాయం చేయగలను?"],
+		"greeting": ["నమస్కారం. మళ్లీ మాట్లాడటం చాలా ఆనందంగా ఉంది.", "హాయ్. మీతో మాట్లాడటం చాలా బాగుంది."],
+		"wellbeing_query": ["అడిగినందుకు ధన్యవాదాలు.", "నేను బాగున్నాను, ధన్యవాదాలు."],
 		"smalltalk": ["వినడానికి బాగుంది.", "చాలా బాగుంది.", "అది మంచి విషయం."],
 		"appreciation": ["అద్భుతం!", "సూపర్.", "అది విని సంతోషంగా ఉంది."],
 		"generic": ["సరే, నేను సహాయం చేస్తాను.", "అలాగే, దీనిని కలిసి చూసేద్దాం."],
 		"answer": ["సరే, ఇది మీకు సమాధానం.", "అలాగే, స్పష్టంగా వివరిస్తాను."],
 		"story": ["సరే, కథను ప్రారంభిద్దాం.", "బాగుంది, ఇప్పుడు ఒక కథ చెబుతాను."],
+		"joke": ["మీ కోసం ఒక జోక్ ఉంది.", "ఇది వింటే నవ్వొస్తుంది."],
 		"poem": ["ఇది ఒక కవిత.", "మీకు నచ్చుతుందని ఆశిస్తున్నాను."],
 		"weather": ["సరే, వాతావరణ వివరాలు చెక్ చేస్తాను.", "ఇప్పుడు వాతావరణ సమాచారం చెబుతాను."],
 		"news": ["సరే, తాజా వార్తలు చెబుతాను.", "ఇప్పుడు ఏముంది చూద్దాం."],
@@ -478,12 +484,14 @@ LANGUAGE_PREFACES = {
 		"fallback": ["ఒక్కసారి ఆలోచిస్తాను."],
 	},
 	"ml": {
-		"greeting": ["നമസ്കാരം!", "ഹലോ!"],
+		"greeting": ["നമസ്കാരം. വീണ്ടും നിങ്ങളോടു സംസാരിക്കുന്നത് സന്തോഷമാണ്.", "ഹലോ. നിങ്ങളുമായി സംസാരിക്കാൻ കഴിഞ്ഞത് സന്തോഷം."],
+		"wellbeing_query": ["ചോദിച്ചതിന് നന്ദി.", "എനിക്ക് സുഖമാണ്, നന്ദി."],
 		"smalltalk": ["അത് കേട്ട് സന്തോഷം.", "നല്ലതാണ്.", "അത് നല്ല കാര്യമാണ്."],
 		"appreciation": ["വളരെ നല്ലത്!", "അദ്ഭുതം.", "അത് കേട്ട് സന്തോഷം."],
 		"generic": ["ശരി, ഞാൻ സഹായിക്കാം.", "അങ്ങനെ ചെയ്യാം, നമുക്ക് നോക്കാം."],
 		"answer": ["ശരി, ഇതാണ് ഉത്തരം.", "അങ്ങനെ ചെയ്യാം, ഞാൻ വ്യക്തമായി വിശദീകരിക്കാം."],
 		"story": ["ശരി, കഥ തുടങ്ങാം.", "ഇപ്പോൾ ഒരു കഥ പറയാം."],
+		"joke": ["നിങ്ങൾക്കായി ഒരു തമാശ പറയാം.", "ഇത് കേട്ടാൽ നിങ്ങൾ ചിരിക്കും."],
 		"poem": ["ഇതാണ് ഒരു കവിത.", "നിങ്ങൾക്ക് ഇഷ്ടപ്പെടുമെന്ന് കരുതുന്നു."],
 		"weather": ["ശരി, കാലാവസ്ഥ വിവരങ്ങൾ നോക്കാം.", "ഇപ്പോൾ കാലാവസ്ഥ അപ്ഡേറ്റ് പറയുന്നു."],
 		"news": ["ശരി, പുതിയ വാർത്തകൾ പറയുന്നു.", "ഇപ്പോൾ എന്തുണ്ട് എന്ന് നോക്കാം."],
@@ -500,12 +508,14 @@ LANGUAGE_PREFACES = {
 		"fallback": ["ഒരു നിമിഷം ആലോചിക്കാം."],
 	},
 	"ar": {
-		"greeting": ["مرحبًا!", "أهلًا!"],
+		"greeting": ["مرحبًا. يسعدني جدًا التحدث معك من جديد.", "أهلًا. من الجميل سماعك والتواصل معك الآن."],
+		"wellbeing_query": ["شكرًا لسؤالك.", "أنا بخير، شكرًا لك."],
 		"smalltalk": ["سعيد بسماع ذلك.", "هذا جميل.", "رائع."],
 		"appreciation": ["ممتاز!", "رائع جدًا.", "سعيد بذلك."],
 		"generic": ["حسنًا، سأساعدك في ذلك.", "تمام، دعنا نراجع هذا معًا."],
 		"answer": ["حسنًا، إليك الإجابة.", "تمام، سأوضح لك الأمر بشكل واضح."],
 		"story": ["حسنًا، لنبدأ القصة.", "رائع، سأحكي لك قصة الآن."],
+		"joke": ["إليك نكتة لطيفة.", "هذه نكتة قد تعجبك."],
 		"poem": ["إليك قصيدة.", "أتمنى أن تنال إعجابك."],
 		"weather": ["حسنًا، سأتفقد حالة الطقس الآن.", "تمام، إليك تحديث الطقس."],
 		"news": ["حسنًا، إليك آخر الأخبار.", "تمام، دعنا نرى ما الجديد."],
@@ -563,6 +573,8 @@ STT_RETRY_ON_LOW_CONFIDENCE = False
 TTS_PRONUNCIATION_MAP = {
     "tarz": "taarz",
     "Parvez": "par vez",
+	"బాగ ఉన్నాను": "బాగున్నాను",
+	"నేను బాగ ఉన్నాను": "నేను బాగున్నాను",
 }
 
 # ========= PERFORMANCE =========

@@ -24,6 +24,7 @@ class Tarz:
 
     TASK_KEYWORDS = {
         "story": {"story", "katha", "kahani", "कहानी", "कथा", "కథ", "حكاية", "قصة"},
+        "joke": {"joke", "funny", "मजाक", "चुटकुला", "జోక్", "തമാശ", "نكتة"},
         "poem": {"poem", "poetry", "shayari", "कविता", "शायरी", "కవిత", "قصيدة"},
         "travel": {
             "trip", "travel", "itinerary", "flight", "flights", "ticket", "tickets",
@@ -117,6 +118,14 @@ class Tarz:
                 "hello", "hi", "hey", "heymate", "mate", "wassup", "wassupp", "whatsup", "sup",
                 "namaste", "नमस्ते", "నమస్కారం", "നമസ്കാരം", "مرحبا",
             },
+            "wellbeing_query": {
+                "how are you", "what about you", "and you", "how about you",
+                "कैसे हो", "कैसे हैं", "आप कैसे हैं", "तुम कैसे हो",
+                "మీరు ఎలా ఉన్నారు", "నువ్వు ఎలా ఉన్నావు", "ఎలా ఉన్నారు",
+                "ela unnavu", "ela unnaru", "meeru ela unnaru", "nuvvu ela unnavu",
+                "സുഖമാണോ", "എങ്ങനെയുണ്ട്", "നിങ്ങൾ എങ്ങനെയുണ്ട്",
+                "كيف حالك", "كيف حالكم", "كيفك",
+            },
             "smalltalk": {
                 "how are you", "what about you", "i am good", "i'm good", "im good", "fine",
                 "कैसे हो", "मैं ठीक हूँ", "आप कैसे हैं", "నేను బాగున్నా", "మీరు ఎలా ఉన్నారు",
@@ -130,6 +139,7 @@ class Tarz:
                 "رائع", "ممتاز", "مذهل",
             },
             "story": {"story", "katha", "kahani", "कहानी", "कथा", "కథ", "kadha", "حكاية", "قصة"},
+            "joke": {"joke", "funny", "मजाक", "चुटकुला", "జోక్", "തമാശ", "نكتة"},
             "poem": {"poem", "poetry", "shayari", "कविता", "शायरी", "పద్య", "కవిత", "قصيدة"},
             "weather": {"weather", "temperature", "forecast", "मौसम", "వాతావరణం", "കാലാവസ്ഥ", "الطقس"},
             "news": {"news", "headlines", "समाचार", "వార్తలు", "വാർത്ത", "أخبار"},
@@ -155,6 +165,15 @@ class Tarz:
                 "namaste", "नमस्ते", "నమస్కారం", "നമസ്കാരം", "مرحبا", "أهلا",
             }):
                 category = "greeting"
+            elif has_any({
+                "how are you", "what about you", "and you", "how about you",
+                "कैसे हो", "कैसे हैं", "आप कैसे हैं", "तुम कैसे हो",
+                "మీరు ఎలా ఉన్నారు", "నువ్వు ఎలా ఉన్నావు", "ఎలా ఉన్నారు",
+                "ela unnavu", "ela unnaru", "meeru ela unnaru", "nuvvu ela unnavu",
+                "സുഖമാണോ", "എങ്ങനെയുണ്ട്", "നിങ്ങൾ എങ്ങനെയുണ്ട്",
+                "كيف حالك", "كيف حالكم", "كيفك",
+            }):
+                category = "wellbeing_query"
             elif has_any({"thanks", "thank you", "धन्यवाद", "ధన్యవాదాలు", "നന്ദി", "شكرا"}):
                 category = "thanks"
             elif has_any({
@@ -175,6 +194,7 @@ class Tarz:
 
         task_to_category = {
             "story": "story",
+            "joke": "joke",
             "poem": "poem",
             "travel": "search",
             "weather": "weather",
@@ -194,6 +214,10 @@ class Tarz:
 
         if category == "generic" and ("?" in text or has_any({"how", "what", "why", "when", "where", "can you", "help"})):
             category = "answer"
+
+        # Prefer silence over unrelated filler when no intent/category is clear.
+        if category == "generic" and current_task is None:
+            return None
 
         tables = getattr(config, "LANGUAGE_PREFACES", {})
         table = tables.get(language) or tables.get("en", {})
@@ -274,6 +298,8 @@ class Tarz:
             return True
         social_phrases = {
             "how are you", "what about you", "i am good", "i'm good", "im good",
+            "ela unnavu", "ela unnaru", "meeru ela unnaru", "nuvvu ela unnavu",
+            "nenu bagunnanu", "nenu bagunnanu andi", "nenu kuda bagunnanu",
             "me bhi", "mein bhi", "main bhi", "mai bhi", "me too", "same here",
             "me bhi thik", "mein bhi thik", "main bhi thik", "main bhi theek", "i am fine too",
             "में भी", "में भी ठीक", "मैं भी", "मैं भी ठीक", "मैं भी ठीक हूँ",
@@ -282,9 +308,12 @@ class Tarz:
             "valare nannayi", "വളരെ നല്ലത്",
             "mumtaz", "ممتاز", "رائع",
             "heymate", "wassup", "wassupp", "whatsup",
-            "ok", "okay", "alright",
+            "alright",
         }
-        return any(phrase in lowered for phrase in social_phrases)
+        return any(
+            (phrase in lowered) if " " in phrase else (phrase in tokens)
+            for phrase in social_phrases
+        )
 
     def _build_effective_prompt(self, normalized_text, previous_task=None, detected_task=None, language=None):
         """Add a small task lock for terse follow-ups to avoid topic drift."""
@@ -467,9 +496,14 @@ class Tarz:
             detected_task=detected_task,
             language=language,
         )
-        # Keep lead-word streaming enabled even with a spoken preface so
-        # generation can overlap and avoid a noticeable gap after filler.
-        use_lead_words = config.TTS_LEAD_WORDS_IMMEDIATE
+        # After a spoken preface, prefer natural punctuation boundaries instead
+        # of ultra-early single-word chunks so continuation sounds smoother.
+        use_lead_words = config.TTS_LEAD_WORDS_IMMEDIATE and not bool(context_preface)
+        lead_words_count = config.TTS_LEAD_WORDS_COUNT
+        first_chunk_min_chars = config.TTS_FIRST_CHUNK_MIN_CHARS
+        first_chunk_min_words = config.TTS_FIRST_CHUNK_MIN_WORDS
+        first_sentence_immediately = config.TTS_FIRST_SENTENCE_IMMEDIATELY and not bool(context_preface)
+        first_word_immediately = config.TTS_FIRST_WORD_IMMEDIATELY and not bool(context_preface)
 
         token_queue = queue.Queue()
         stream_done = object()
@@ -521,15 +555,15 @@ class Tarz:
             min_words=config.TTS_MIN_WORDS,
             max_chars=config.TTS_MAX_CHARS,
             max_words=config.TTS_MAX_WORDS,
-            first_sentence_immediately=config.TTS_FIRST_SENTENCE_IMMEDIATELY,
-            first_chunk_min_chars=config.TTS_FIRST_CHUNK_MIN_CHARS,
-            first_chunk_min_words=config.TTS_FIRST_CHUNK_MIN_WORDS,
-            first_word_immediately=config.TTS_FIRST_WORD_IMMEDIATELY,
+            first_sentence_immediately=first_sentence_immediately,
+            first_chunk_min_chars=first_chunk_min_chars,
+            first_chunk_min_words=first_chunk_min_words,
+            first_word_immediately=first_word_immediately,
             first_sentence_wordwise=config.TTS_FIRST_SENTENCE_WORDWISE,
             first_sentence_word_chunk_size=config.TTS_FIRST_SENTENCE_WORD_CHUNK_SIZE,
             chunk_on_minor_punctuation=config.TTS_CHUNK_ON_MINOR_PUNCTUATION,
             lead_words_immediate=use_lead_words,
-            lead_words_count=config.TTS_LEAD_WORDS_COUNT,
+            lead_words_count=lead_words_count,
             should_stop=self.tts.is_interrupted,
         )
 

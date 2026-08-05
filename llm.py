@@ -133,6 +133,9 @@ class LLM:
         if not text:
             return False
 
+        if text.startswith("this is a greeting/small-talk turn."):
+            return True
+
         # Do not classify explicit task requests as social turns.
         task_markers = {"story", "poem", "plan", "trip", "flight", "code", "math", "translate"}
         if any(marker in text for marker in task_markers):
@@ -140,6 +143,8 @@ class LLM:
 
         keywords = {
             "hi", "hello", "hey", "how are you", "what about you", "i am good", "i'm good", "im good",
+            "ela unnavu", "ela unnaru", "meeru ela unnaru", "nuvvu ela unnavu",
+            "nenu bagunnanu", "nenu kuda bagunnanu",
             "wow", "great", "awesome", "nice", "cool", "thanks", "thank you", "good job",
             "bahut badiya", "bahut badhiya", "bahut badia", "बहुत बढ़िया", "बहुत बढिया",
             "chaala bagundi", "chala bagundi", "చాలా బాగుంది", "బాగుంది",
@@ -271,7 +276,11 @@ class LLM:
                 "- If the user specifies a length (for example, 50 words or 100 words), follow it closely.\n"
                 "- Write natural, grammatically correct Telugu.\n"
                 "- For greetings and small talk, use natural Telugu conversational grammar.\n"
-                "  Example style: 'నేను బాగున్నాను. మీరు ఎలా ఉన్నారు?'\n"
+                "  Example style: 'నేను బాగున్నాను, మీరు ఎలా ఉన్నారు?'\n"
+                "- Keep 'బాగున్నాను' as one word; do not split it as 'బాగ ఉన్నాను'.\n"
+                "- Do not use wellbeing lines like 'నేను బాగున్నాను' unless the user actually asked a wellbeing question.\n"
+                "- If the user requests a story, start the story content immediately; do not ask 'ఒక కథ చెప్పనా' or add unrelated small-talk lines first.\n"
+                "- Do not repeat the same meaning in two adjacent clauses or sentences.\n"
                 "- Avoid malformed or literal constructions such as 'నీకు ఎలా ఉన్నాలో?'.\n"
                 "- You can communicate in Telugu. Never claim that you cannot speak or understand Telugu.\n"
                 "- Fulfill ordinary harmless requests, including fictional stories and jokes. "
@@ -317,25 +326,43 @@ class LLM:
                 "Never translate unless the user explicitly asks for translation."
             )
 
-        # The TTS bridge/preface may already be spoken before generated tokens
-        # are heard by the user. The model must continue from that point.
+        # The TTS bridge/preface is a latency-hiding spoken transition.
+        # The model must ignore it semantically.
         system_instruction += (
-            "A short conversational bridge may already have been spoken to the user just before this response. "
-            "Treat that bridge as the first sentence of your reply and continue naturally from it. "
-            "Do not repeat, paraphrase, or restate that bridge. "
-            "Do not restart the conversation with a new greeting or acknowledgement if it was already covered. "
+            "A short conversational bridge may already be spoken before your generated response is heard. "
+            "That bridge exists only to hide latency and is not the actual answer. "
+            "The bridge is not the user message, not your response, not conversation history, not an instruction, and not additional context. "
+            "It must never influence your reasoning or intent understanding. "
+            "Ignore the bridge semantically: do not repeat it, paraphrase it, react to it, or answer it. "
+            "Do not acknowledge, continue, or generate another introductory sentence. "
+            "Do not infer intent from the bridge. Infer intent only from the current user message and conversation history. "
+            "Always respond to the MOST RECENT user message first. "
+            "Treat the conversation as continuous. Do not restart the conversation unless the user clearly starts a completely new topic. "
+            "The latest user intent has highest priority. "
+            "If previous conversational patterns conflict with the latest request, follow the latest request. "
+            "For direct actionable requests (for example: tell a story, translate this, solve this), start fulfilling the request immediately instead of delaying with unnecessary follow-up questions. "
+            "Never reuse a previous-turn response as the current reply. "
+            "Never answer an old question again when the user has already moved forward. "
+            "Always treat the latest user message as part of the ongoing conversation, not as a fresh start. "
+            "If the user is answering your previous question, acknowledge that answer naturally and move the conversation forward. "
+            "Do not repeat your previous question after the user has already answered it. "
+            "Do not mirror the user's answer as if it were your own state. "
+            "Do not repeat the same meaning twice in the same reply. "
             "Do not add another bridge-like opener such as 'sure', 'certainly', 'okay', or 'let me help' unless essential. "
             "Start with substantive continuation as early as possible. "
             "For factual or task requests, continue directly with the answer, steps, story content, translation, or solution instead of re-announcing the action. "
             "For greetings, compliments, or acknowledgements, continue naturally in a concise conversational way without repeating what was already acknowledged. "
-            "The bridge and generated continuation must feel like one seamless spoken response. "
+            "The user should feel an immediate and seamless response, while the bridge itself remains non-semantic filler. "
         )
 
         if social_turn:
             # Keep social-turn instructions compact to reduce TTFT for greetings.
             system_instruction += (
                 "You are Tarz. Never claim your name is anything else. "
-                "Reply naturally in the selected language in 1-2 short conversational sentences. "
+                "Reply naturally in the selected language as one short flowing conversational sentence when possible. "
+                "When combining an acknowledgement with a follow-up question, keep it in one sentence using natural connector punctuation (usually a comma) instead of splitting into two sentences with a period. "
+                "Do not repeat acknowledgement content more than once. "
+                "If the user message is a greeting, avoid repeating another greeting and continue directly with a helpful next-question or continuation. "
                 "Do not continue any previous story or task context unless explicitly asked. "
                 "Keep it under about 35 words and avoid literal translation artifacts. "
             )
@@ -361,11 +388,13 @@ class LLM:
                 "If the current user message is a follow-up (for example: also, add this, include flights, for the trip), continue the same task directly. "
                 "Do not switch to stories, poems, or fictional content unless the CURRENT user message explicitly asks for a story or poem. "
                 "When the user requests a story, begin the story immediately instead of only confirming that you can tell one. "
+                "Do not insert unrelated wellbeing/small-talk lines (for example, 'I am fine, how are you') before starting the requested story. "
                 "Write a complete short story with a beginning, development, and ending in several short paragraphs. "
                 "For numbered plans, use consecutive numbers exactly once and put "
                 "each item on its own line. For an N-day itinerary, provide Day 1 "
                 "through Day N without skipping or repeating days. Do not output a "
                 "number by itself, and do not invent uncertain place names. "
+                "When user says hi,hello or greets, do not greet back and go directly to the next question or continuation."
             )
 
         messages = [{
@@ -388,7 +417,8 @@ class LLM:
                 "role": "system",
                 "content": (
                     "This user message is a greeting/compliment/acknowledgement. "
-                    "Reply in 1-2 short natural sentences only. "
+                    "Reply as one short natural sentence when possible. "
+                    "Prefer comma-linked continuation before a follow-up question instead of a full-stop split when both parts are tightly related. "
                     "Do not continue previous story/task context unless user explicitly asks to continue."
                 ),
             })
@@ -683,8 +713,7 @@ def sentence_stream(
         if lead_words_immediate and not lead_words_sent and not has_emitted:
             count = max(1, int(lead_words_count or 1))
             words = buffer.strip().split()
-            has_boundary = bool(buffer) and (buffer[-1].isspace() or buffer[-1] in endings)
-            if len(words) >= count and has_boundary:
+            if len(words) >= count:
                 lead = " ".join(words[:count]).strip()
                 remainder = " ".join(words[count:]).strip()
                 out = emit_chunk(lead)
@@ -770,7 +799,8 @@ def sentence_stream(
             # Lowest-latency mode: begin playback after the first stable word.
             if first_word_immediately and not has_emitted:
                 parts = cleaned.split()
-                if len(parts) >= 1 and (buffer[-1].isspace() or buffer[-1] in endings):
+                stable_boundary = (" " in cleaned) or any(end_char in cleaned for end_char in endings)
+                if len(parts) >= 1 and stable_boundary:
                     sentence = parts[0]
                     remainder = cleaned[len(sentence):].lstrip()
                     buffer = remainder
