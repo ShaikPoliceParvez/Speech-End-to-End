@@ -72,97 +72,103 @@ python app.py
 
 ```mermaid
 flowchart TD
-    subgraph INPUT["Input"]
-        MIC["🎤 Microphone"]
-        TXT["⌨️ Text input"]
+    MIC["🎤 Microphone"]
+    TXT["⌨️ Text input"]
+
+    subgraph VAD_BLOCK["1 · Voice Activity Detection"]
+        VAD_ENERGY["Energy-based VAD\nRMS endpoint detection"]
+        VAD_SILERO["Silero VAD filter\naudio cleaning before transcription"]
     end
 
-    subgraph VAD_BLOCK["Voice Activity Detection"]
-        VAD_ENERGY["Energy-based VAD\n(RMS threshold)"]
-        VAD_SILERO["Silero VAD filter\n(audio cleaning inside Whisper)"]
-    end
-
-    subgraph STT_BLOCK["Speech-to-Text"]
-        WHISPER["Faster-Whisper\n(small, cpu, int8)"]
-        HALLUC["Hallucination filter\n(known bad phrases)"]
-        RETRY_CHECK{"Retry needed?\n(lang mismatch /\nscript error /\nsuspicious text)"}
-        INDIC_CHECK{"IndicConformer\nenabled &\nlang hint known?"}
-        INDIC["IndicConformer\n(hi / te / ml)"]
-        WHISPER2["Whisper re-decode\n(forced lang + hotwords\n+ script prefix)"]
+    subgraph STT_BLOCK["2 · Speech-to-Text"]
+        INDIC_CHECK{"IndicConformer\nenabled & lang\nhint known?"}
+        INDIC["IndicConformer\nhi · te · ml"]
+        WHISPER["Faster-Whisper\nsmall · cpu · int8"]
+        HALLUC["Hallucination filter\nknown-bad phrase check"]
+        RETRY_CHECK{"Retry?\nlang mismatch /\nscript error /\nsuspicious text"}
+        WHISPER2["Whisper re-decode\nforced lang + hotwords\n+ script prefix"]
         TRANSCRIPT["Transcript"]
     end
 
-    subgraph LANG_BLOCK["Language & Script Detection"]
-        SCRIPT["detect_script()\nDevanagari / Telugu /\nMalayalam / Arabic / Latin"]
-        LANGDET["detect_dominant_language()\nCore word banks + STT hint\n+ previous turn language"]
-        NORM["normalize_text()\nHinglish token map +\nphrase map →  Devanagari\nTelglish / Manglish / Arabizi\n(no native normalisation)"]
+    subgraph LANG_BLOCK["3 · Language & Script Detection"]
+        SCRIPT["detect_script\nUnicode range check"]
+        LANGDET["detect_dominant_language\nword banks + STT hint\n+ previous turn language"]
+        NORM["normalize_text\nHinglish token map + phrase map\nTelglish / Manglish / Arabizi"]
     end
 
-    subgraph ROUTER_BLOCK["Intent Router"]
-        SCORE["Weighted semantic scoring\nCHAT · VISION · OCR · SYSTEM"]
-        INTENT{"Intent"}
+    subgraph ROUTER_BLOCK["4 · Intent Router"]
+        SCORE["Weighted semantic scoring\nphrase hits · noun hits · verb hits"]
+        INTENT{"CHAT\nVISION\nOCR"}
     end
 
-    subgraph CONTEXT_BLOCK["Context & Memory"]
-        TASK["Task detection\nstory / joke / poem / travel\nweather / math / coding\ntranslation / camera"]
-        FOLLOWUP["Terse follow-up check\n+ task-lock prompt"]
-        MEMORY["Conversation memory\n(full or strict history mode)"]
-        FILLER["Context preface / filler\n(intent + language aware\nrandom selection)"]
+    subgraph CONTEXT_BLOCK["5 · Context & Memory"]
+        TASK["Task detection\nstory · joke · poem · travel\nweather · math · coding · camera"]
+        FOLLOWUP["Terse follow-up check\ntask-lock prompt build"]
+        MEMORY["Conversation history\nfull or strict · N turns"]
+        FILLER["Filler selection\ncategory + language aware"]
     end
 
-    subgraph LLM_BLOCK["LLM (Ollama)"]
-        CAMERA["📷 Camera capture\n+ frame encode"]
+    subgraph LLM_BLOCK["6 · LLM"]
+        CAMERA["📷 Camera capture\nframe encode"]
         PROMPT["Prompt builder\nsocial wrap / task lock\n+ history injection"]
-        STREAM["Streaming generation\ngemma3:4b\n(sentence-chunked)"]
+        STREAM["Ollama streaming\ngemma3:4b · sentence-chunked"]
     end
 
-    subgraph TTS_BLOCK["TTS Router"]
+    subgraph TTS_BLOCK["7 · TTS Router"]
         TTS_ROUTE{"Language?"}
-        SUPERTONIC["SuperTonic\n(en / hi)"]
-        PIPER["Piper ONNX\n(te / ml / ar)\nlazy-loaded per language"]
-        PRONOUNCE["Pronunciation map\n(custom G2P corrections)"]
+        SUPERTONIC["SuperTonic\nen · hi"]
+        PIPER["Piper ONNX\nte · ml · ar\nlazy-loaded"]
+        PRONOUNCE["Pronunciation map\nG2P corrections"]
     end
 
-    subgraph OUTPUT["Output"]
-        PLAY["🔊 Audio playback"]
-        BARGEIN["⏎ Barge-in interrupt\n(Enter key stops speech)"]
+    subgraph OUTPUT_BLOCK["8 · Output"]
+        PLAY["🔊 Playback"]
+        BARGEIN["⏎ Barge-in\nEnter key stops speech"]
     end
 
-    LANGFUSE["📊 Langfuse tracing\nVAD · STT · Language · Router\nMemory · LLM · TTS · Camera"]
+    LANGFUSE[["📊 Langfuse\nper-turn + per-span tracing"]]
 
+    %% ── Voice path ──────────────────────────────────────────────────────────
     MIC --> VAD_ENERGY
-    VAD_ENERGY -->|"Speech ended\n(silence ≥ 0.5 s)"| VAD_SILERO
-    VAD_SILERO --> WHISPER
-    TXT --> SCRIPT
+    VAD_ENERGY -->|"silence ≥ 0.5 s"| VAD_SILERO
+    VAD_SILERO --> INDIC_CHECK
 
+    %% ── STT branch ──────────────────────────────────────────────────────────
+    INDIC_CHECK -->|"Yes"| INDIC
+    INDIC_CHECK -->|"No"| WHISPER
+    INDIC --> TRANSCRIPT
     WHISPER --> HALLUC
     HALLUC --> RETRY_CHECK
-    RETRY_CHECK -->|"No retry"| INDIC_CHECK
-    RETRY_CHECK -->|"Retry"| INDIC_CHECK
-    INDIC_CHECK -->|"Yes"| INDIC
-    INDIC_CHECK -->|"No"| WHISPER2
-    INDIC --> TRANSCRIPT
+    RETRY_CHECK -->|"No retry"| TRANSCRIPT
+    RETRY_CHECK -->|"Retry"| WHISPER2
     WHISPER2 --> TRANSCRIPT
+
+    %% ── Text path joins here ────────────────────────────────────────────────
+    TXT --> SCRIPT
     TRANSCRIPT --> SCRIPT
 
+    %% ── Language & script ───────────────────────────────────────────────────
     SCRIPT --> LANGDET
     LANGDET --> NORM
-    NORM --> SCORE
 
+    %% ── Router ──────────────────────────────────────────────────────────────
+    NORM --> SCORE
     SCORE --> INTENT
+
+    %% ── Context branch ──────────────────────────────────────────────────────
     INTENT -->|"CHAT"| TASK
-    INTENT -->|"VISION"| CAMERA
-    INTENT -->|"OCR"| CAMERA
+    INTENT -->|"VISION / OCR"| CAMERA
 
     TASK --> FOLLOWUP
     FOLLOWUP --> MEMORY
     MEMORY --> FILLER
-    FILLER --> PROMPT
-    FILLER -.->|"Spoken in parallel\nwhile LLM generates"| SUPERTONIC
 
+    %% ── LLM ─────────────────────────────────────────────────────────────────
+    FILLER --> PROMPT
     CAMERA --> PROMPT
     PROMPT --> STREAM
 
+    %% ── TTS ─────────────────────────────────────────────────────────────────
     STREAM --> TTS_ROUTE
     TTS_ROUTE -->|"en / hi"| SUPERTONIC
     TTS_ROUTE -->|"te / ml / ar"| PIPER
@@ -171,11 +177,17 @@ flowchart TD
     PRONOUNCE --> PLAY
     PLAY --> BARGEIN
 
-    STREAM -.->|"per-turn span"| LANGFUSE
-    WHISPER -.->|"STT span"| LANGFUSE
-    SCORE -.->|"Router span"| LANGFUSE
-    MEMORY -.->|"Memory span"| LANGFUSE
-    PLAY -.->|"TTS + Playback span"| LANGFUSE
+    %% ── Filler spoken in parallel while LLM generates ───────────────────────
+    FILLER -.->|"parallel\nspeech"| TTS_ROUTE
+
+    %% ── Tracing ─────────────────────────────────────────────────────────────
+    VAD_SILERO -.-> LANGFUSE
+    TRANSCRIPT -.-> LANGFUSE
+    NORM -.-> LANGFUSE
+    INTENT -.-> LANGFUSE
+    MEMORY -.-> LANGFUSE
+    STREAM -.-> LANGFUSE
+    PLAY -.-> LANGFUSE
 ```
 
 ## Multilingual Behavior
