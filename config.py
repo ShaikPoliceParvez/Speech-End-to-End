@@ -18,9 +18,9 @@ LLM_WARMUP_ON_STARTUP = True
 # History policy for response generation:
 # - "strict": ignore prior chat unless explicitly requested or a follow-up lock prompt is present.
 # - "full": always include conversation history.
-LLM_HISTORY_MODE = "strict"
+LLM_HISTORY_MODE = "full"
 # Number of prior user+assistant turns to include when history is allowed.
-LLM_HISTORY_TURNS = 2
+LLM_HISTORY_TURNS = 6
 
 # ========= LANGUAGE =========
 
@@ -260,7 +260,7 @@ HINGLISH_PHRASE_MAP = {
 
 # "small" is the realistic minimum for usable Hindi accuracy. The multilingual
 # "base" model is notably weak on Devanagari; "small" runs fine on cpu/int8.
-WHISPER_SIZE = "base" #tiny | base | small | medium | large
+WHISPER_SIZE = "small" #tiny | base | small | medium | large
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE = "int8"
 
@@ -270,7 +270,8 @@ WHISPER_BEAM_SIZE = 1
 
 # Temperature fallback: if a decode is low-confidence / repetitive, Whisper
 # retries at higher temperatures instead of emitting garbage.
-WHISPER_TEMPERATURES = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+# Two steps instead of six — enough fallback without the 4x latency hit on Hindi/Telugu.
+WHISPER_TEMPERATURES = (0.0, 0.2)
 
 # Quality gates used with the temperature fallback above.
 WHISPER_COMPRESSION_RATIO_THRESHOLD = 2.4
@@ -353,8 +354,9 @@ WHISPER_ARABIC_HOTWORDS = (
 STT_ALLOWED_LANGUAGES = ("en", "hi", "te", "ml", "ar")
 
 # Use previous conversation language as STT decode hint for faster follow-up
-# turns in multilingual conversations.
-STT_PREFER_PREVIOUS_LANGUAGE_HINT = False
+# turns in multilingual conversations. Saves a full auto-detect + multi-language
+# retry on every Hindi/Telugu/Malayalam/Arabic turn.
+STT_PREFER_PREVIOUS_LANGUAGE_HINT = True
 
 # Pseudo-streaming configuration
 # First partial after 2.0s — ensures Whisper has real speech, not leading silence
@@ -460,13 +462,13 @@ LANGUAGE_PREFACES = {
 		"fallback": ["एक क्षण सोचने दीजिए।"],
 	},
 	"te": {
-		"greeting": ["నమస్కారం. మళ్లీ మాట్లాడటం చాలా ఆనందంగా ఉంది.", "హాయ్. మీతో మాట్లాడటం చాలా బాగుంది."],
-		"wellbeing_query": ["అడిగినందుకు ధన్యవాదాలు.", "నేను బాగున్నాను, ధన్యవాదాలు."],
-		"smalltalk": ["వినడానికి బాగుంది.", "చాలా బాగుంది.", "అది మంచి విషయం."],
+		"greeting": ["నమస్కారం. మళ్లీ మాట్లాడటం చాలా ఆనందంగా ఉంది.", "నమస్కారం. మీతో మాట్లాడటం సంతోషంగా ఉంది."],
+		"wellbeing_query": ["అడిగినందుకు ధన్యవాదాలు.", "నేను బాగు ఉన్నాను, ధన్యవాదాలు."],
+		"smalltalk": ["వినడానికి సంతోషంగా ఉంది.", "చాలా సంతోషంగా ఉంది.", "అది మంచి విషయం."],
 		"appreciation": ["అద్భుతం!", "సూపర్.", "అది విని సంతోషంగా ఉంది."],
 		"generic": ["సరే, నేను సహాయం చేస్తాను.", "అలాగే, దీనిని కలిసి చూసేద్దాం."],
 		"answer": ["సరే, ఇది మీకు సమాధానం.", "అలాగే, స్పష్టంగా వివరిస్తాను."],
-		"story": ["సరే, కథను ప్రారంభిద్దాం.", "బాగుంది, ఇప్పుడు ఒక కథ చెబుతాను."],
+		"story": ["సరే, కథను ప్రారంభిద్దాం.", "సరే, ఇప్పుడు ఒక కథ చెబుతాను."],
 		"joke": ["మీ కోసం ఒక జోక్ ఉంది.", "ఇది వింటే నవ్వొస్తుంది."],
 		"poem": ["ఇది ఒక కవిత.", "మీకు నచ్చుతుందని ఆశిస్తున్నాను."],
 		"weather": ["సరే, వాతావరణ వివరాలు చెక్ చేస్తాను.", "ఇప్పుడు వాతావరణ సమాచారం చెబుతాను."],
@@ -559,7 +561,7 @@ TTS_LANGUAGE_BACKENDS = {
 # Energy-based VAD for endpoint detection in the microphone.
 # Silero VAD is used separately inside Whisper (vad_filter=True in stt.py)
 # for audio cleaning before transcription — not for endpoint timing.
-VAD_SILENCE_THRESHOLD = 0.01       # Normalised RMS energy below which a chunk is silent
+VAD_SILENCE_THRESHOLD = 0.015      # Normalised RMS energy below which a chunk is silent
 VAD_SILENCE_DURATION  = 0.5        # Seconds of continuous silence to declare end-of-speech
 VAD_MIN_SPEECH_DURATION = 0.3      # Minimum speech before endpoint is considered
 VAD_GRACE_PERIOD = 0.12            # Extra silence buffer to protect short mid-sentence pauses
@@ -570,11 +572,39 @@ VAD_MAX_RECORD_SECONDS = 30.0      # Hard cap: force-stop if VAD never fires
 STT_RETRY_ON_LOW_CONFIDENCE = False
 
 # Add custom entries to improve name pronunciation in TTS.
+# Telugu: Piper's G2P splits Xున్నY clusters incorrectly (reads ు as syllable-start).
+# Spacing around ఉన్న gives the model correctly-bounded phoneme groups.
 TTS_PRONUNCIATION_MAP = {
+    # Assistant / Names
+    "Tarz": "Taarz",
     "tarz": "taarz",
-    "Parvez": "par vez",
-	"బాగ ఉన్నాను": "బాగున్నాను",
-	"నేను బాగ ఉన్నాను": "నేను బాగున్నాను",
+    "Parvez": "Par Vez",
+    "parvez": "par vez",
+
+    # AI / Technical Terms
+    "Gemma": "Jemma",
+    "gemma": "jemma",
+    "Qwen": "Kwen",
+    "qwen": "kwen",
+    "Llama": "Lah-ma",
+    "llama": "lah-ma",
+    "Ollama": "Oh-lah-ma",
+    "ollama": "oh-lah-ma",
+    "Whisper": "Whisper",
+    "whisper": "whisper",
+    "ChatGPT": "Chat G P T",
+    "chatgpt": "chat gee pee tee",
+
+    # Telugu: Piper's G2P splits Xు clusters incorrectly (reads ు as syllable-start).
+    # Spacing around ఉన్న / ఉండ gives the model correctly-bounded phoneme groups.
+    "బాగున్నాను": "బాగు ఉన్నాను",
+    "బాగున్నారు": "బాగు ఉన్నారు",
+    "బాగున్నావు": "బాగు ఉన్నావు",
+    "బాగుంది": "బాగు ఉంది",
+    "బాగుందా": "బాగు ఉందా",
+    # LLM sometimes splits incorrectly — normalise those too.
+    "బాగ ఉన్నాను": "బాగు ఉన్నాను",
+    "నేను బాగ ఉన్నాను": "నేను బాగు ఉన్నాను",
 }
 
 # ========= PERFORMANCE =========

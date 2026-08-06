@@ -382,7 +382,8 @@ class LLM:
                 "Before finishing, self-check that the whole reply reads like a native speaker wrote it. "
                 "For practical tasks (planning, recommendations, translation, search-style help), provide concrete and useful details, not just a short acknowledgement. "
                 "If the request is underspecified, ask exactly one concise clarifying question. "
-                "Do not bring in previous conversation details unless the user explicitly asks to continue or recall earlier context. "
+                "Use the conversation history silently to maintain context and continuity — for example, remembering a destination, topic, or preference the user already stated. "
+                "Do NOT proactively mention, quote, or summarise previous responses unless the current message is a direct follow-up to them or the user explicitly asks about earlier content. "
                 "If the current message is only a greeting, compliment, or acknowledgement, reply briefly and naturally, and do not continue prior stories or tasks. "
                 "Always prioritize the user's current message over prior creative context. "
                 "If the current user message is a follow-up (for example: also, add this, include flights, for the trip), continue the same task directly. "
@@ -610,6 +611,10 @@ def sentence_stream(
     lead_words_immediate=False,
     lead_words_count=2,
     should_stop=None,
+    # Short clauses below these thresholds are held in pending instead of
+    # being spoken alone, so adjacent short sentences play as one breath.
+    min_force_chars=20,
+    min_force_words=4,
 ):
 
     buffer = ""
@@ -676,6 +681,10 @@ def sentence_stream(
 
         # Punctuation boundaries should flush immediately for natural pacing.
         if force_emit:
+            # Hold short clauses so they join the next sentence and play
+            # as one unbroken breath (e.g. "मैं ठीक हूँ। आपका दिन कैसा है?").
+            if len(pending) < min_force_chars and len(pending.split()) < min_force_words:
+                return None
             out = pending
             pending = ""
             has_emitted = True

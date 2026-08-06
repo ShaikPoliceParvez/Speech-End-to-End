@@ -24,6 +24,53 @@ try:
 except Exception:
     num2words = None
 
+# Compiled once at import; expand English contractions before apostrophe removal.
+_CONTRACTIONS = [
+    (re.compile(r"\bcan't\b", re.IGNORECASE), "cannot"),
+    (re.compile(r"\bwon't\b", re.IGNORECASE), "will not"),
+    (re.compile(r"\bshan't\b", re.IGNORECASE), "shall not"),
+    (re.compile(r"\bdon't\b", re.IGNORECASE), "do not"),
+    (re.compile(r"\bdoesn't\b", re.IGNORECASE), "does not"),
+    (re.compile(r"\bdidn't\b", re.IGNORECASE), "did not"),
+    (re.compile(r"\bisn't\b", re.IGNORECASE), "is not"),
+    (re.compile(r"\baren't\b", re.IGNORECASE), "are not"),
+    (re.compile(r"\bwasn't\b", re.IGNORECASE), "was not"),
+    (re.compile(r"\bweren't\b", re.IGNORECASE), "were not"),
+    (re.compile(r"\bhadn't\b", re.IGNORECASE), "had not"),
+    (re.compile(r"\bhasn't\b", re.IGNORECASE), "has not"),
+    (re.compile(r"\bhaven't\b", re.IGNORECASE), "have not"),
+    (re.compile(r"\bcouldn't\b", re.IGNORECASE), "could not"),
+    (re.compile(r"\bwouldn't\b", re.IGNORECASE), "would not"),
+    (re.compile(r"\bshouldn't\b", re.IGNORECASE), "should not"),
+    (re.compile(r"\bI'm\b"), "I am"),
+    (re.compile(r"\bI've\b"), "I have"),
+    (re.compile(r"\bI'll\b"), "I will"),
+    (re.compile(r"\bI'd\b"), "I would"),
+    (re.compile(r"\byou're\b", re.IGNORECASE), "you are"),
+    (re.compile(r"\byou've\b", re.IGNORECASE), "you have"),
+    (re.compile(r"\byou'll\b", re.IGNORECASE), "you will"),
+    (re.compile(r"\byou'd\b", re.IGNORECASE), "you would"),
+    (re.compile(r"\bhe's\b", re.IGNORECASE), "he is"),
+    (re.compile(r"\bhe'll\b", re.IGNORECASE), "he will"),
+    (re.compile(r"\bshe's\b", re.IGNORECASE), "she is"),
+    (re.compile(r"\bshe'll\b", re.IGNORECASE), "she will"),
+    (re.compile(r"\bit's\b", re.IGNORECASE), "it is"),
+    (re.compile(r"\bwe're\b", re.IGNORECASE), "we are"),
+    (re.compile(r"\bwe've\b", re.IGNORECASE), "we have"),
+    (re.compile(r"\bwe'll\b", re.IGNORECASE), "we will"),
+    (re.compile(r"\bthey're\b", re.IGNORECASE), "they are"),
+    (re.compile(r"\bthey've\b", re.IGNORECASE), "they have"),
+    (re.compile(r"\bthey'll\b", re.IGNORECASE), "they will"),
+    (re.compile(r"\bthat's\b", re.IGNORECASE), "that is"),
+    (re.compile(r"\bthere's\b", re.IGNORECASE), "there is"),
+    (re.compile(r"\bhere's\b", re.IGNORECASE), "here is"),
+    (re.compile(r"\bwhat's\b", re.IGNORECASE), "what is"),
+    (re.compile(r"\bwho's\b", re.IGNORECASE), "who is"),
+    (re.compile(r"\bhow's\b", re.IGNORECASE), "how is"),
+    (re.compile(r"\bwhere's\b", re.IGNORECASE), "where is"),
+    (re.compile(r"\blet's\b", re.IGNORECASE), "let us"),
+]
+
 
 class Speaker:
 
@@ -257,6 +304,10 @@ class Speaker:
         text = text.replace("...", "  ")
         text = re.sub(r"[,:;]+", "  ", text)
         text = re.sub(r"[\(\)\[\]\{\}]", " ", text)
+        # Expand contractions before stripping apostrophes so "here's" → "here is",
+        # not "heres".
+        for pattern, replacement in _CONTRACTIONS:
+            text = pattern.sub(replacement, text)
         text = re.sub(r"[\"'`]", "", text)
         text = re.sub(r"[-–—]+", " ", text)
         text = re.sub(r"[!?]+", "  ", text)

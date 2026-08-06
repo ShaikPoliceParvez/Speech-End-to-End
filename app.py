@@ -739,6 +739,7 @@ class Tarz:
                 self.tracing.flush()
 
             except KeyboardInterrupt:
+                self.tts.stop()
                 print("\nVoice mode interrupted. Returning to mode selection...")
                 self.tracing.flush()
                 return

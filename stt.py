@@ -3,6 +3,17 @@ import numpy as np
 import time
 import re
 
+# Phrases Whisper commonly hallucinates on near-silent / ambient-noise input.
+# Matching is case-insensitive against stripped, punctuation-stripped text.
+_HALLUCINATION_PHRASES = frozenset({
+    "thank you", "thanks", "thank you for watching",
+    "thank you for watching this video", "please subscribe",
+    "like and subscribe", "subtitles by", "subtitle by",
+    "you", "bye", "okay", "ok", "um", "uh", "ah", "hmm",
+    # Common non-English hallucinations
+    "धन्यवाद", "शुक्रिया", "ధన్యవాదాలు", "നന്ദി", "شكرا",
+})
+
 from config import (
     WHISPER_SIZE,
     WHISPER_DEVICE,
@@ -214,6 +225,11 @@ class STT:
         if len(audio) == 0:
             return self.empty_result()
 
+        # Reject near-silent audio before invoking Whisper; it halluccinates
+        # common phrases ("Thank you", etc.) on ambient-noise recordings.
+        if float(np.max(np.abs(audio))) < 0.02:
+            return self.empty_result()
+
         transcription_start = time.perf_counter()
         segments, info = self._decode(audio, language, final)
 
@@ -225,6 +241,10 @@ class STT:
             parts.append(segment.text)
 
         text = "".join(parts).strip()
+
+        # Drop known Whisper hallucination phrases immediately — no retry helps.
+        if text.lower().rstrip(".,!?…") in _HALLUCINATION_PHRASES:
+            return self.empty_result()
 
         detected_language = getattr(info, "language", None)
         script = self.detect_script(text)
@@ -243,11 +263,15 @@ class STT:
         )
 
         # Retry only for strong failure signals.
+        # Also retry when a forced language hint produced unusable output
+        # (e.g. user switches language mid-conversation).
+        hint_failed = language is not None and not first_pass_usable
         needs_retry = (
-            language is None
+            (language is None or hint_failed)
             and not first_pass_usable
             and (
-                (
+                hint_failed
+                or (
                     STT_RETRY_ON_LOW_CONFIDENCE
                     and getattr(info, "language_probability", 0.0) < WHISPER_LANGUAGE_CONFIDENCE_HIGH
                 )
