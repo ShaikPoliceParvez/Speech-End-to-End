@@ -17,9 +17,16 @@ from tracing import LangfuseTracer
 class Tarz:
 
     FOLLOWUP_TOKENS = {
+        # English continuation signals
         "also", "add", "include", "more", "continue", "next",
         "too", "and", "plus", "then", "after", "another",
         "details", "options", "examples", "price", "cost", "budget",
+        # Telugu continuation signals
+        "కూడా", "ఇంకా", "అలాగే", "అదనంగా",
+        # Hindi continuation signals
+        "भी", "और", "के अलावा", "इसके",
+        # Malayalam continuation signals
+        "കൂടി", "കൂടെ", "ഇനിയും",
     }
 
     TASK_KEYWORDS = {
@@ -282,9 +289,19 @@ class Tarz:
         lowered = (text or "").strip().lower()
         if not lowered:
             return False
-        words = lowered.split()
-        followup_signals = {"also", "add", "include", "more", "next", "continue", "too", "and"}
-        return len(words) <= 4 or any(signal in lowered for signal in followup_signals)
+        # Word-count alone is NOT a reliable signal — Indic sentences are
+        # naturally short (e.g. 4-word Telugu questions are complete requests).
+        # Only explicit continuation vocabulary triggers followup mode.
+        followup_signals = {
+            "also", "add", "include", "more", "next", "continue", "too", "and",
+            # Telugu
+            "కూడా", "ఇంకా", "అలాగే",
+            # Hindi
+            "भी", "और",
+            # Malayalam
+            "കൂടി", "കൂടെ",
+        }
+        return any(signal in lowered for signal in followup_signals)
 
     @staticmethod
     def _is_social_turn(text):
@@ -458,6 +475,16 @@ class Tarz:
 
         self.tracing.update_turn(turn, normalized_text, language, intent)
 
+        if config.DEBUG:
+            print(f"\n{'─'*55}")
+            print(f"[DEBUG] Latest query   : {normalized_text}")
+            print(f"[DEBUG] Intent         : {intent}")
+            print(f"[DEBUG] Detected task  : {detected_task}")
+            print(f"[DEBUG] Previous task  : {previous_task}")
+            print(f"[DEBUG] Current task   : {self.current_task}")
+            print(f"[DEBUG] Language       : {language}")
+            print(f"{'─'*55}")
+
         with self.tracing.start_step(
             "Memory",
             metadata={"type": "conversation-history", "rag_enabled": False},
@@ -498,6 +525,13 @@ class Tarz:
         )
         # After a spoken preface, prefer natural punctuation boundaries instead
         # of ultra-early single-word chunks so continuation sounds smoother.
+        if config.DEBUG:
+            print(f"[DEBUG] Bridge         : {context_preface!r}")
+            print(f"[DEBUG] Effective prompt: {effective_prompt[:120]}..." if len(effective_prompt) > 120 else f"[DEBUG] Effective prompt: {effective_prompt}")
+            hist = self.llm.memory.messages()
+            print(f"[DEBUG] History turns  : {len(hist) // 2} turns")
+            print(f"{'─'*55}\n")
+
         use_lead_words = config.TTS_LEAD_WORDS_IMMEDIATE and not bool(context_preface)
         lead_words_count = config.TTS_LEAD_WORDS_COUNT
         first_chunk_min_chars = config.TTS_FIRST_CHUNK_MIN_CHARS
@@ -683,7 +717,6 @@ class Tarz:
                         with self.tracing.start_step(
                             "STT",
                             metadata={
-                                "engine": "faster-whisper",
                                 "model": config.WHISPER_SIZE,
                                 "beam_size": config.WHISPER_BEAM_SIZE,
                                 "compute_type": config.WHISPER_COMPUTE,
@@ -699,6 +732,11 @@ class Tarz:
                                     decode_hint = previous_language
 
                             result = self.stt.transcribe(audio, language=decode_hint)
+                            _engine = (
+                                "indic-conformer"
+                                if decode_hint in config.STT_INDIC_LANGUAGES and result.get("text")
+                                else "faster-whisper"
+                            )
                             self.tracing.update_step(
                                 transcription,
                                 output={
@@ -709,6 +747,7 @@ class Tarz:
                                     "transcript_length": len(result["text"]),
                                     "latency_ms": result["latency_ms"],
                                 },
+                                metadata={"engine": _engine},
                             )
 
                         if self._return_to_menu_requested(result["text"]):

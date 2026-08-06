@@ -1,7 +1,15 @@
-from faster_whisper import WhisperModel
+﻿from faster_whisper import WhisperModel
 import numpy as np
 import time
 import re
+
+# IndicConformer import is optional; missing package falls back to Whisper-only.
+try:
+    from indic_asr_onnx import IndicTranscriber as _IndicBase
+    from indic_stt import StreamingIndicTranscriber as _IndicStreamer
+    _INDIC_PKG_OK = True
+except ImportError:
+    _INDIC_PKG_OK = False
 
 # Phrases Whisper commonly hallucinates on near-silent / ambient-noise input.
 # Matching is case-insensitive against stripped, punctuation-stripped text.
@@ -30,6 +38,8 @@ from config import (
     WHISPER_LANGUAGE_CONFIDENCE_HIGH,
     STT_RETRY_ON_LOW_CONFIDENCE,
     STT_ALLOWED_LANGUAGES,
+    STT_INDIC_ASR_ENABLED,
+    STT_INDIC_LANGUAGES,
     DEFAULT_LANGUAGE,
     HINDI_ROMAN_CORE_WORDS,
     TELUGU_ROMAN_CORE_WORDS,
@@ -60,6 +70,50 @@ class STT:
         }
 
         print("Whisper Ready")
+
+        # ── IndicConformer (optional; Whisper remains the fallback) ───
+        self._indic: _IndicStreamer | None = None
+        if STT_INDIC_ASR_ENABLED and _INDIC_PKG_OK:
+            _langs = sorted(STT_INDIC_LANGUAGES & set(STT_ALLOWED_LANGUAGES))
+            if _langs:
+                try:
+                    print(f"Loading IndicConformer ({', '.join(_langs)})...")
+                    _t0 = time.perf_counter()
+                    _base = _IndicBase()
+                    self._indic = _IndicStreamer(_base, languages=_langs)
+                    self.model_startup_metrics["indic_ms"] = round(
+                        (time.perf_counter() - _t0) * 1000, 2
+                    )
+                    print(f"IndicConformer Ready ({', '.join(_langs)})")
+                except Exception as _e:
+                    print(f"[STT] IndicConformer unavailable: {_e} — using Whisper only")
+
+    def _transcribe_indic(self, audio: np.ndarray, language: str) -> "dict | None":
+        """
+        Attempt IndicConformer transcription for a known Indic language.
+        Returns a result dict on success, None in all failure cases so the
+        caller falls back to Whisper (covers both exceptions and language
+        switches where IndicConformer produces no output).
+        """
+        try:
+            raw = self._indic.transcribe(audio, language=language)
+            text = (raw.get("partial") or "").strip()
+            # Empty output on non-silent audio means language switch or unclear
+            # speech; return None so Whisper auto-detect handles it.
+            if not text:
+                return None
+            return {
+                "text": text,
+                "language": language,
+                "confidence": 0.95,           # IndicConformer gives no per-utterance score
+                "script": self.detect_script(text),
+                "first_segment_ms": raw.get("encoder_ms"),
+                "first_partial_transcript": text,
+                "latency_ms": raw.get("total_ms", 0.0),
+            }
+        except Exception as exc:
+            print(f"[STT] IndicConformer error ({exc}) \u2014 falling back to Whisper")
+            return None
 
     def _decode(self, audio, language, final):
         initial_prompt = {
@@ -225,10 +279,52 @@ class STT:
         if len(audio) == 0:
             return self.empty_result()
 
-        # Reject near-silent audio before invoking Whisper; it halluccinates
+        # Reject near-silent audio before invoking Whisper; it hallucinates
         # common phrases ("Thank you", etc.) on ambient-noise recordings.
         if float(np.max(np.abs(audio))) < 0.02:
             return self.empty_result()
+
+        # -- IndicConformer fast path -----------------------------------------------
+        # Always run detect_language() (~50 ms) to verify the language hint before
+        # committing to IndicConformer.  This catches language switches that the
+        # hint (based on previous-turn memory) would miss.
+        effective_indic_lang = None
+        if self._indic is not None:
+            try:
+                _det, _conf, _ = self.model.detect_language(audio)
+                _high = _conf >= WHISPER_LANGUAGE_CONFIDENCE_HIGH
+
+                if language is not None and language in STT_INDIC_LANGUAGES:
+                    if not _high:
+                        # Low-confidence detection → trust the conversation hint
+                        effective_indic_lang = language
+                    elif _det not in STT_INDIC_LANGUAGES:
+                        # Strong detection of non-Indic (English, Arabic…) → Whisper
+                        pass  # effective_indic_lang stays None
+                    elif _det != language and _det in getattr(self._indic, "_post_nets", {}):
+                        # Switched to a different Indic language (te→hi, hi→ml, …)
+                        effective_indic_lang = _det
+                    else:
+                        # Same Indic language confirmed
+                        effective_indic_lang = language
+                elif language is None and _high and _det in STT_INDIC_LANGUAGES:
+                    # No hint: first turn with detected Indic language
+                    effective_indic_lang = _det
+
+            except Exception:
+                # detect_language failed; fall back to hint-only routing
+                if language is not None and language in STT_INDIC_LANGUAGES:
+                    effective_indic_lang = language
+
+        if effective_indic_lang is not None:
+            result = self._transcribe_indic(audio, effective_indic_lang)
+            if result is not None:
+                return result
+            # IndicConformer gave no output (exception or language switch).
+            # Use Whisper with auto-detect so the switch is handled cleanly.
+            language = None
+
+        # -- Whisper path (English, Arabic, auto-detect, and language-switch fallback) --
 
         transcription_start = time.perf_counter()
         segments, info = self._decode(audio, language, final)

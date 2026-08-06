@@ -571,6 +571,12 @@ VAD_MAX_RECORD_SECONDS = 30.0      # Hard cap: force-stop if VAD never fires
 # retry on stronger failure signals (unsupported language/script mismatch/etc.).
 STT_RETRY_ON_LOW_CONFIDENCE = False
 
+# IndicConformer routing: use this model for these language codes instead of
+# Whisper.  Only applied when the language hint is known (not auto-detect).
+# Languages must be present in the IndicConformer adapter directory.
+STT_INDIC_ASR_ENABLED = True
+STT_INDIC_LANGUAGES = frozenset({"hi", "te", "ml"})
+
 # Add custom entries to improve name pronunciation in TTS.
 # Telugu: Piper's G2P splits Xున్నY clusters incorrectly (reads ు as syllable-start).
 # Spacing around ఉన్న gives the model correctly-bounded phoneme groups.

@@ -260,6 +260,23 @@ class StreamingIndicTranscriber:
             "buffering": False,
         }
 
+    def transcribe(self, audio: np.ndarray, language: Optional[str] = None) -> dict:
+        """
+        Transcribe a complete utterance in one shot (no chunking).
+        This is the primary integration entry-point for the STT router.
+
+        Returns the same feed() dict shape for consistency.
+        """
+        if language is not None:
+            self.set_language(language)
+        self.reset()
+        old = self._chunk_samples
+        self._chunk_samples = max(len(audio), 1)  # treat the whole audio as one chunk
+        try:
+            return self.feed(audio)
+        finally:
+            self._chunk_samples = old  # restore so streaming use still works
+
     def get_partial(self) -> str:
         return self._text
 
