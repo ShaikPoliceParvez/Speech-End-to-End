@@ -1,3 +1,4 @@
+# Core dependencies
 faster-whisper
 langfuse==4.14.2
 num2words
@@ -11,3 +12,10 @@ python-dotenv
 sounddevice
 soundfile
 supertonic
+
+# Optional: IndicConformer for higher-accuracy Hindi / Telugu / Malayalam STT
+# Requires STT_INDIC_ASR_ENABLED = True in config.py (default).
+# Falls back to Whisper automatically if not installed.
+# onnxruntime
+# torch
+# indic-asr-onnx
