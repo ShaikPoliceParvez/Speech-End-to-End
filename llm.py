@@ -471,6 +471,7 @@ class LLM:
         with generation if generation is not None else nullcontext(None) as observation:
             if self.tracer is not None:
                 self.tracer.record_event(observation, "LLM Streaming Started")
+            print(f"messages: {messages}")
             response = ollama.chat(
                 model=self.model,
                 messages=messages,

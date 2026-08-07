@@ -374,12 +374,20 @@ def resolve_language(
     """
     Resolve the language using script, Roman vocabulary, Whisper, then history.
 
-    Unicode script and decisive Roman-language evidence are reliable transcript
-    signals, so they take priority over a conflicting Whisper ID. A high-
-    confidence, supported Whisper result is used only when those signals do
-    not disagree. Conversation history is the final fallback for genuinely
-    ambiguous acknowledgements.
+    PRIORITY: High-confidence STT hint FIRST (≥0.80)
+    Why? IndicConformer returns "adi chala bagundi" (Roman Telugu), but if it gets 
+    normalized to Devanagari later, script detection sees "अदि चाला" and wrongly thinks Hindi.
+    By trusting high-confidence hints upfront, we avoid this confusion.
     """
+    # ✓ PRIORITY 1: High-confidence STT hint - trust it absolutely
+    supported_hint = stt_hint.lower() if isinstance(stt_hint, str) else None
+    if (
+        supported_hint in SUPPORTED_LANGUAGES
+        and stt_confidence is not None
+        and stt_confidence >= WHISPER_LANGUAGE_CONFIDENCE_HIGH
+    ):
+        return {"language": supported_hint, "script": detect_script(text), "reason": "high_confidence_stt_hint"}
+
     requested_language = _explicit_language_switch(text)
     if requested_language is not None:
         return {"language": requested_language, "script": detect_script(text), "reason": "explicit_switch"}
@@ -401,15 +409,6 @@ def resolve_language(
     roman_language = _strong_roman_language(scores, token_count)
     if roman_language:
         return {"language": roman_language, "script": script, "reason": "roman_vocabulary"}
-
-    supported_hint = stt_hint.lower() if isinstance(stt_hint, str) else None
-    if (
-        supported_hint in SUPPORTED_LANGUAGES
-        and stt_confidence is not None
-        and stt_confidence >= WHISPER_LANGUAGE_CONFIDENCE_HIGH
-        and script != "arabic"
-    ):
-        return {"language": supported_hint, "script": script, "reason": "high_confidence_whisper"}
 
     # If any language vocabulary matched (even tied), prefer conversation history
     # over the English fallback — single shared words like greetings should stay

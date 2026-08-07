@@ -4,6 +4,40 @@ import time
 import numpy as np
 import sounddevice as sd
 
+
+def _api_rank(api_name):
+    _PREF = ["mme", "wasapi", "directsound", "wdm-ks"]
+    key = api_name.lower()
+    for i, p in enumerate(_PREF):
+        if p in key:
+            return i
+    return len(_PREF)
+
+
+def _find_best_input_device(sample_rate):
+    """Return the input device index that natively supports sample_rate, preferring MME."""
+    try:
+        hostapis = sd.query_hostapis()
+        all_devices = sd.query_devices()
+    except Exception:
+        return None
+
+    candidates = []
+    for idx, dev in enumerate(all_devices):
+        if dev["max_input_channels"] < 1:
+            continue
+        api = hostapis[dev["hostapi"]]
+        candidates.append({"index": idx, "api_name": api["name"], "rank": _api_rank(api["name"])})
+    candidates.sort(key=lambda d: d["rank"])
+
+    for c in candidates:
+        try:
+            sd.check_input_settings(device=c["index"], samplerate=sample_rate)
+            return c["index"]
+        except Exception:
+            pass
+    return None
+
 from config import (
     SAMPLE_RATE,
     VAD_SILENCE_THRESHOLD,
@@ -37,6 +71,7 @@ class Microphone:
     ):
         self.sample_rate = sample_rate
         self.block_size = max(1, int(sample_rate * block_duration))
+        self._input_device = _find_best_input_device(sample_rate)
 
         self.silence_threshold = silence_threshold
         self.silence_duration = silence_duration
@@ -84,6 +119,7 @@ class Microphone:
             dtype="float32",
             blocksize=self.block_size,
             callback=self._callback,
+            device=self._input_device,
         ):
             while True:
 
@@ -141,6 +177,14 @@ class Microphone:
             return (audio, metrics) if return_metrics else audio
 
         audio = np.concatenate(frames).astype(np.float32)
+        
+        # Amplify quiet microphone signals (gain ~4x)
+        # Typical quiet mic: ~0.005 amplitude → boosted to ~0.02
+        max_amplitude = np.max(np.abs(audio))
+        if max_amplitude < 0.01:
+            gain = 0.01 / max(max_amplitude, 1e-6)
+            audio = np.clip(audio * gain, -1.0, 1.0)
+            print(f"  🔊 Amplified (gain: {gain:.1f}x, max_amplitude: {max_amplitude:.4f} → {np.max(np.abs(audio)):.4f})")
 
         print(f"✓ Recorded: {len(audio) / self.sample_rate:.2f}s")
 

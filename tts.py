@@ -1,3 +1,4 @@
+import math
 import threading
 import queue
 import re
@@ -6,6 +7,109 @@ import time
 import numpy as np
 import sounddevice as sd
 from numbers import Number
+
+try:
+    from scipy.signal import resample_poly as _scipy_resample_poly
+except ImportError:
+    _scipy_resample_poly = None
+
+
+def _resample(audio, from_rate, to_rate):
+    """Resample 1-D float32 audio with a proper anti-aliasing filter."""
+    if from_rate == to_rate or audio.size == 0:
+        return audio
+    g = math.gcd(int(to_rate), int(from_rate))
+    up, down = int(to_rate) // g, int(from_rate) // g
+    if _scipy_resample_poly is not None:
+        return _scipy_resample_poly(audio, up, down).astype(np.float32)
+    # Fallback: linear interpolation (lower quality, no scipy)
+    n_out = max(1, int(len(audio) * to_rate / from_rate))
+    return np.interp(
+        np.linspace(0, len(audio) - 1, n_out),
+        np.arange(len(audio)),
+        audio,
+    ).astype(np.float32)
+
+
+# Preference order when multiple host APIs expose the same physical device.
+_HOST_API_PREFERENCE = ["mme", "wasapi", "directsound", "wdm-ks"]
+# Standard rates to probe when no device natively supports the model rate.
+_STANDARD_RATES = [48000, 44100, 32000, 24000, 22050, 16000]
+
+
+def _api_rank(api_name):
+    key = api_name.lower()
+    for i, pref in enumerate(_HOST_API_PREFERENCE):
+        if pref in key:
+            return i
+    return len(_HOST_API_PREFERENCE)
+
+
+def _find_best_output_device(sample_rate):
+    """
+    Enumerate all output devices and return the one that natively supports
+    `sample_rate`, preferring MME > WASAPI > DirectSound > WDM-KS.
+
+    Returns (device_index, actual_rate, api_name, device_name).
+    actual_rate == sample_rate  →  native playback
+    actual_rate != sample_rate  →  resampling required
+    """
+    try:
+        hostapis = sd.query_hostapis()
+        all_devices = sd.query_devices()
+    except Exception:
+        return None, sample_rate, "default", "default"
+
+    # Build candidate list sorted by host-API preference.
+    candidates = []
+    for idx, dev in enumerate(all_devices):
+        if dev["max_output_channels"] < 1:
+            continue
+        api = hostapis[dev["hostapi"]]
+        candidates.append({
+            "index": idx,
+            "name": dev["name"],
+            "api_name": api["name"],
+            "rank": _api_rank(api["name"]),
+        })
+    candidates.sort(key=lambda d: d["rank"])
+
+    # 1. Prefer a device that natively supports sample_rate.
+    for c in candidates:
+        try:
+            sd.check_output_settings(device=c["index"], samplerate=sample_rate)
+            return c["index"], sample_rate, c["api_name"], c["name"]
+        except Exception:
+            pass
+
+    # 2. No native match — find the closest standard rate on the best device.
+    for rate in _STANDARD_RATES:
+        if rate == sample_rate:
+            continue
+        for c in candidates:
+            try:
+                sd.check_output_settings(device=c["index"], samplerate=rate)
+                return c["index"], rate, c["api_name"], c["name"]
+            except Exception:
+                pass
+
+    # 3. Ultimate fallback: let sounddevice choose.
+    return None, sample_rate, "default", "default"
+
+
+def _print_device_banner(device_name, api_name, device_index, sample_rate, model_rate):
+    line = "-" * 49
+    print(line)
+    print(f"Output Device : {device_name}")
+    print(f"Host API      : {api_name}")
+    print(f"Device Index  : {device_index}")
+    if sample_rate == model_rate:
+        print(f"Sample Rate   : {sample_rate} Hz")
+        print(f"Native        : Yes")
+    else:
+        print(f"Sample Rate   : {sample_rate} Hz")
+        print(f"Resampled From: {model_rate} Hz")
+    print(line)
 
 from supertonic import TTS
 from config import (
@@ -105,7 +209,8 @@ class Speaker:
         self._metrics_lock = threading.Lock()
         self._turn_metrics = {}
         self._stream = None
-        self._stream_rate = None
+        self._stream_rate = None       # model rate that opened the stream
+        self._stream_actual_rate = None  # hardware rate the stream runs at
         self._interrupted = threading.Event()
         self._speaking = threading.Event()
         self.num2words_lang_map = {
@@ -377,6 +482,32 @@ class Speaker:
 
         return arr[start:end]
 
+    def _open_stream(self, rate):
+        """Select the best output device for `rate` and open a stream on it."""
+        device_index, actual_rate, api_name, device_name = _find_best_output_device(rate)
+
+        if actual_rate != rate:
+            print(
+                f"[TTS] WARNING: No device natively supports {rate} Hz. "
+                f"Resampling to {actual_rate} Hz on '{device_name}' ({api_name})."
+            )
+
+        stream = sd.OutputStream(
+            samplerate=actual_rate,
+            channels=1,
+            dtype="float32",
+            device=device_index,
+        )
+        stream.start()
+        # Prime the DMA ring buffer to prevent initial audio clipping/breakage.
+        # Increased to 50ms (from 20ms) to ensure buffer fully initialized before first real audio.
+        # This eliminates first-word consonant dropouts (especially noticeable in Telugu/Malayalam).
+        # The buffer initialization delay is worth the audio quality improvement.
+        prime_duration_ms = 50
+        prime_samples = int(actual_rate * (prime_duration_ms / 1000.0))
+        stream.write(np.zeros((prime_samples, 1), dtype=np.float32))
+        return stream, actual_rate
+
     def _synth_worker(self):
 
         while True:
@@ -404,8 +535,17 @@ class Speaker:
                 elif isinstance(info, Number):
                     sample_rate = int(info)
 
-                output_rate = int((sample_rate or 24000) * TTS_SPEED)
+                output_rate = int(sample_rate or 24000)
                 trimmed_audio = self._trim_silence(wav, output_rate)
+
+                # Resample audio duration for speed instead of faking the rate.
+                # Passing a non-standard rate (e.g. 22080) to PortAudio breaks MME.
+                if TTS_SPEED != 1.0 and trimmed_audio.size:
+                    n_out = max(1, int(len(trimmed_audio) / TTS_SPEED))
+                    x_new = np.linspace(0, len(trimmed_audio) - 1, n_out)
+                    trimmed_audio = np.interp(
+                        x_new, np.arange(len(trimmed_audio)), trimmed_audio
+                    ).astype(np.float32)
 
                 if trimmed_audio.size and not self._interrupted.is_set():
                     self.enqueue_audio(trimmed_audio, output_rate, sentence, language)
@@ -440,23 +580,35 @@ class Speaker:
 
                 if self._stream is None or self._stream_rate != output_rate:
                     if self._stream is not None:
-                        self._stream.stop()
-                        self._stream.close()
-                    self._stream = sd.OutputStream(
-                        samplerate=output_rate,
-                        channels=1,
-                        dtype="float32",
-                    )
-                    self._stream.start()
+                        try:
+                            self._stream.stop()
+                            self._stream.close()
+                        except Exception:
+                            pass
+                    self._stream, actual_rate = self._open_stream(output_rate)
                     self._stream_rate = output_rate
+                    self._stream_actual_rate = actual_rate
+                else:
+                    actual_rate = self._stream_actual_rate
 
-                audio = np.asarray(audio, dtype=np.float32).reshape(-1, 1)
-                block_size = max(1, int(output_rate * 0.05))
+                audio = np.asarray(audio, dtype=np.float32)
+                if actual_rate != output_rate:
+                    audio = _resample(audio, output_rate, actual_rate)
+                audio = audio.reshape(-1, 1)
+                block_size = max(1, int(actual_rate * 0.05))
                 self._speaking.set()
                 for start in range(0, len(audio), block_size):
                     if self._interrupted.is_set():
                         break
-                    self._stream.write(audio[start:start + block_size])
+                    try:
+                        self._stream.write(audio[start:start + block_size])
+                    except Exception as write_err:
+                        # Reset stream so next chunk reopens it cleanly.
+                        self._stream = None
+                        self._stream_rate = None
+                        self._stream_actual_rate = None
+                        print(f"[TTS] Audio write error (stream reset): {write_err}")
+                        break
 
                 with self._metrics_lock:
                     self._turn_metrics["playback_end"] = time.perf_counter()
