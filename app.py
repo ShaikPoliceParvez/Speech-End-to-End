@@ -14,7 +14,7 @@
 # └─ Playback: Intelligent device selection + resampling + stream priming
 #
 # KEY FEATURES:
-# • ChatGPT-style output: Full response printed once LLM finishes (not token-by-token)
+# • Streaming output: LLM tokens printed to console as they are generated (token-by-token)
 # • Filler phrases: Contextual \"Let me find that\" plays while LLM generates (low latency)
 # • Streaming pipeline: LLM tokens flow to TTS immediately (not end-to-end latency)
 # • Multilingual: English, Hindi, Telugu, Malayalam, Arabic with native vocabulary
@@ -726,7 +726,7 @@ class Tarz:
         7. Tracing & metrics: Log latencies, model engines, chunk counts to Langfuse
         
         Key behaviors:
-        - Token-by-token printing is batched: raw LLM tokens accumulated, full response printed once when done
+        - Token-by-token printing: LLM tokens are printed to console as they stream in real time
         - Filler phrase plays while LLM generates (async): chat-GPT style responsiveness
         - Barge-in on ENTER: User can interrupt TTS playback and ask new question immediately
         - Task-lock mode: Terse follow-ups stay in prior task context ("flights" in travel mode)
@@ -907,24 +907,24 @@ class Tarz:
         )
         barge_in_listener.start()
 
-        # Accumulator for raw LLM tokens (for console printing, separate from TTS tokens).
-        # Unlike TTS sentence stream which chunks/buffers tokens, raw_tokens preserves exact token sequence.
-        # Collected silently during generation; printed as one block when LLM stream ends.
+        # Accumulator for raw LLM tokens (for memory/tracing, separate from TTS tokens).
         raw_tokens = []
 
         # Consumer function: Drains token_queue and yields tokens to sentence_stream().
-        # Also accumulates raw_tokens and prints full response when LLM finishes (when stream_done received).
+        # Prints each token immediately as it streams, then prints a newline when done.
         # This is the "queued tokens" generator that bridges LLM output and TTS sentence buffering.
         def queued_tokens():
+            first_token = True
             while True:
                 token = token_queue.get()
                 if token is stream_done:
-                    # Print full LLM response the moment generation finishes, while TTS plays it.
-                    full_text = "".join(raw_tokens).strip()
-                    if full_text:
-                        print(f"Tarz: {full_text}")
+                    print()  # Newline after streamed response ends.
                     return
                 raw_tokens.append(token)
+                if first_token:
+                    print("Tarz: ", end="", flush=True)
+                    first_token = False
+                print(token, end="", flush=True)
                 yield token
 
         # Sentence buffering: Groups tokens into sentences/chunks for TTS synthesis.
