@@ -15,14 +15,14 @@ class TTSSettings(BaseSettings):
 
     # Low-latency first-chunk controls
     TTS_FIRST_SENTENCE_IMMEDIATELY: bool = True
-    TTS_FIRST_CHUNK_MIN_CHARS: int = 40
+    TTS_FIRST_CHUNK_MIN_CHARS: int = 9999  # disable non-punctuation early-emit; start TTS at first sentence boundary
     TTS_FIRST_CHUNK_MIN_WORDS: int = 1
     TTS_FIRST_WORD_IMMEDIATELY: bool = True
     TTS_FIRST_SENTENCE_WORDWISE: bool = False
     TTS_FIRST_SENTENCE_WORD_CHUNK_SIZE: int = 2
 
     # Pacing / punctuation
-    TTS_CHUNK_ON_MINOR_PUNCTUATION: bool = True
+    TTS_CHUNK_ON_MINOR_PUNCTUATION: bool = False
     TTS_LEAD_WORDS_IMMEDIATE: bool = True
     TTS_LEAD_WORDS_COUNT: int = 2
     # Short clauses below both thresholds are held and merged with the next sentence.

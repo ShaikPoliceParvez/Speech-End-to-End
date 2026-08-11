@@ -316,7 +316,7 @@ _ROMAN_LANGUAGE_VOCABULARY = {
         "maa3", "ind", "thumma",
         "na3am", "atakallam", "asma3", "akhbirni",
         "hadha", "hatha", "hadi", "hadhi", "kullu", "baad", "qabl",
-        "gulf", "dubai", "riyadh", "arabi", "arabic", "masr", "misr",
+        "gulf", "arabi", "arabic", "masr", "misr",
     },
 }
 
