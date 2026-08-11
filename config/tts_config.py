@@ -15,7 +15,7 @@ class TTSSettings(BaseSettings):
 
     # Low-latency first-chunk controls
     TTS_FIRST_SENTENCE_IMMEDIATELY: bool = True
-    TTS_FIRST_CHUNK_MIN_CHARS: int = 8
+    TTS_FIRST_CHUNK_MIN_CHARS: int = 40
     TTS_FIRST_CHUNK_MIN_WORDS: int = 1
     TTS_FIRST_WORD_IMMEDIATELY: bool = True
     TTS_FIRST_SENTENCE_WORDWISE: bool = False
@@ -25,6 +25,10 @@ class TTSSettings(BaseSettings):
     TTS_CHUNK_ON_MINOR_PUNCTUATION: bool = True
     TTS_LEAD_WORDS_IMMEDIATE: bool = True
     TTS_LEAD_WORDS_COUNT: int = 2
+    # Short clauses below both thresholds are held and merged with the next sentence.
+    # Raise these to reduce audible gaps between short adjacent sentences.
+    TTS_MIN_FORCE_CHARS: int = 50
+    TTS_MIN_FORCE_WORDS: int = 8
 
     # Contextual filler/preface before model stream
     TTS_CONTEXT_PREFACE_ENABLED: bool = True

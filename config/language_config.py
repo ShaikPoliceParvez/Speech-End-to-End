@@ -44,6 +44,7 @@ AMBIGUOUS_LANGUAGE_TOKENS: frozenset = frozenset({
 
 HINDI_ROMAN_CORE_WORDS: frozenset = frozenset({
     "aap", "ap", "mai", "main", "mein", "mujhe", "muje", "mera", "meri", "mere", "liye", "mereliye", "keliye",
+    "mene", "maine", "liya", "suna", "sunliya", "sunli",
     "tum", "kaise", "kese", "kya", "hai", "hain", "ho", "kal", "naam",
     "kitne", "baje", "chal", "raha", "rahe", "batao", "sunao", "dekh",
     "jara", "zara", "kholo", "ek", "mein",
@@ -82,11 +83,15 @@ MALAYALAM_ROMAN_CORE_WORDS: frozenset = frozenset({
 
 TELUGU_ROMAN_CORE_WORDS: frozenset = frozenset({
     "nenu", "nuvvu", "meeru", "mee", "ni", "nee", "naaku", "naku", "mana", "maaku",
+    "nuv", "sahayam", "chestava", "chesthava",
     "ela", "enti", "em", "undi", "unnaru", "unnavu", "unnava", "unnanu",
-    "cheppu", "cheppandi", "chey", "cheyyi", "choodu", "choosi", "kanipistundi", "kavali", "avunu", "kaadu",
+    "alaga", "oho", "cheppagalava", "cheppagalara", "oka", "chinna",
+    "cheppu", "cheppandi", "cheppavu", "cheppava", "chey", "cheyyi", "choodu", "choosi", "kanipistundi", "kavali", "avunu", "kaadu",
+    "balega", "balegaa", "balegara", "balegandi",
     "ledu", "namaskaram", "dhanyavadalu", "peru", "pairu", "evaru", "eppudu", "enduku", "katha", "vinali", "inko",
     "ekkada", "ikkada", "akkada", "telugu", "lo", "matladu", "matladandi", "idi", "chaduvu", "rasundi",
     "namaskaram", "namaste", "ayyo", "aiyyo", "sare", "sarey",
+    "kachitanga", "kacchitanga", "cheddam", "chedham", "plan cheddam", "plan chedham",
 })
 
 ARABIC_ROMAN_CORE_WORDS: frozenset = frozenset({

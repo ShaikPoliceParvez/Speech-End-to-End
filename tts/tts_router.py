@@ -49,7 +49,8 @@ class TTSRouter:
             return None
         backend = self._piper_backends.get(language)
         if backend is None:
-            model_path = Path(__file__).resolve().parent / route["model"]
+            project_root = Path(__file__).resolve().parent.parent
+            model_path = project_root / route["model"]
             try:
                 backend = PiperSpeaker(model_path, self.supertonic, on_event=self.on_event)
             except FileNotFoundError as error:

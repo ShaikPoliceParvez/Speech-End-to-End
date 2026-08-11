@@ -43,6 +43,12 @@ class LanguageDetectionTests(unittest.TestCase):
     def test_roman_hindi_majority_beats_shared_words(self):
         self.assertEqual(detect_dominant_language("tumhe bahubali ka story patahe"), "hi")
 
+    def test_roman_hindi_feedback_not_stuck_in_previous_telugu(self):
+        self.assertEqual(
+            detect_dominant_language("already mene sunliya na", previous_language="te"),
+            "hi",
+        )
+
     def test_roman_telugu_vocabulary(self):
         self.assertEqual(detect_dominant_language("atanu ela chanipoyadu"), "te")
 
@@ -51,6 +57,7 @@ class LanguageDetectionTests(unittest.TestCase):
         self.assertEqual(detect_dominant_language("tum mujhe kya bataoge"), "hi")
         self.assertEqual(detect_dominant_language("tapai lai ke chha"), "ne")
         self.assertEqual(detect_dominant_language("nuvvu naaku cheptava"), "te")
+        self.assertEqual(detect_dominant_language("nuv naku sahayam chestava"), "te")
 
     def test_explicit_switch_to_nepali(self):
         self.assertEqual(detect_dominant_language("please switch language to nepali"), "ne")

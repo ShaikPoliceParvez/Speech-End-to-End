@@ -71,6 +71,9 @@ import threading
 import queue
 import random
 import re
+import json
+from urllib import request
+from datetime import datetime
 from audio.microphone import Microphone
 from stt.stt import STT
 from core.router import Router
@@ -138,7 +141,8 @@ class Tarz:
     # Malayalam (നമസ്കാരം), and Arabic (مرحبا) equivalents. Used by _is_social_turn() and 
     # _build_context_preface() to handle non-transactional conversation naturally.
     SOCIAL_TOKENS = {
-        "hi", "hello", "hey", "namaste", "नमस्ते", "नमस्कार",
+        "hi", "hello", "hey", "namaste", "namaskaram", "नमस्ते", "नमस्कार",
+        "alaga", "oho",
         "hii", "heyy", "yo", "ok", "okay", "thanks", "thank", "wow", "great",
         "thik", "theek", "ठीक",
         "धन्यवाद", "सन्चै", "सञ्चै", "dhanyabad", "sanchai", "sanchai cha", "thikcha", "thik chha",
@@ -469,6 +473,21 @@ class Tarz:
         if not text:
             return None
 
+        # Appreciation about a previous story should not restart story mode.
+        if any(
+            phrase in text
+            for phrase in {
+                "manchi katha",
+                "adi manchi katha",
+                "nice story",
+                "good story",
+                "achi kahani",
+                "achhi kahani",
+                "bahut achhi kahani",
+            }
+        ):
+            return None
+
         # VISION/OCR intents detected by router → camera task (hardcoded, no vocabulary check needed).
         if intent in ("VISION", "OCR"):
             return "camera"
@@ -659,6 +678,216 @@ class Tarz:
         # Default: No wrapping needed — return bare input.
         return text
 
+    @staticmethod
+    def _utility_fast_response(text, language):
+        """Deterministic non-social fast path for common utility turns."""
+        lowered = (text or "").strip().lower()
+        if not lowered:
+            return None
+
+        # Normalize minor punctuation/typos so inputs like "what;s today's date"
+        # match utility markers reliably.
+        lowered = re.sub(r"[;]+", " ", lowered)
+        lowered = lowered.replace("'", "")
+        tokens = set(re.findall(r"[a-zA-Z]+|[\u0900-\u097f]+|[\u0c00-\u0c7f]+|[\u0d00-\u0d7f]+|[\u0600-\u06ff]+", lowered))
+
+        def matches_markers(markers):
+            # Multi-word markers use substring matching; single-word markers
+            # must match whole tokens so "ok" does not match "oka".
+            for marker in markers:
+                m = marker.lower().strip()
+                if not m:
+                    continue
+                if " " in m:
+                    if m in lowered:
+                        return True
+                elif m in tokens:
+                    return True
+            return False
+
+        def fetch_json(url, timeout=2.0):
+            req = request.Request(url, headers={"User-Agent": "tarz/1.0"})
+            with request.urlopen(req, timeout=timeout) as response:
+                payload = response.read().decode("utf-8", errors="ignore")
+            return json.loads(payload)
+
+        def fetch_weather_snapshot():
+            # wttr.in provides IP-based location and current weather without API keys.
+            data = fetch_json("https://wttr.in/?format=j1")
+            area = ((data.get("nearest_area") or [{}])[0])
+            current = ((data.get("current_condition") or [{}])[0])
+            return {
+                "city": (((area.get("areaName") or [{}])[0]).get("value") or ""),
+                "region": (((area.get("region") or [{}])[0]).get("value") or ""),
+                "country": (((area.get("country") or [{}])[0]).get("value") or ""),
+                "temp_c": current.get("temp_C"),
+                "feels_c": current.get("FeelsLikeC"),
+                "desc": (((current.get("weatherDesc") or [{}])[0]).get("value") or ""),
+                "humidity": current.get("humidity"),
+                "wind_kmph": current.get("windspeedKmph"),
+            }
+
+        time_markers = {
+            "en": {"what time", "time now", "current time", "time"},
+            "hi": {"कितने बजे", "समय", "टाइम"},
+            "ne": {"कति बजे", "समय", "टाइम"},
+            "te": {"ఎంత సమయం", "సమయం", "టైమ్"},
+            "ml": {"എത്ര മണി", "സമയം", "ടൈം"},
+            "ar": {"كم الساعة", "الوقت", "الساعه"},
+        }
+        date_markers = {
+            "en": {"date", "todays date", "today date", "what is the date", "current date"},
+            "hi": {"आज की तारीख", "तारीख", "दिनांक", "आज कौन सी तारीख"},
+            "ne": {"आजको मिति", "मिति", "आज कुन मिति"},
+            "te": {"ఈరోజు తేదీ", "తేదీ", "ఈ రోజు తేదీ"},
+            "ml": {"ഇന്നത്തെ തീയതി", "തീയതി", "ഇന്ന് തീയതി"},
+            "ar": {"تاريخ اليوم", "التاريخ", "ما هو التاريخ"},
+        }
+        weather_markers = {
+            "en": {"weather", "temperature", "forecast", "climate"},
+            "hi": {"मौसम", "तापमान", "पूर्वानुमान"},
+            "ne": {"मौसम", "तापक्रम", "पूर्वानुमान"},
+            "te": {"వాతావరణం", "ఉష్ణోగ్రత", "ఫోర్కాస్ట్"},
+            "ml": {"കാലാവസ്ഥ", "താപനില", "ഫോർകാസ്റ്റ്"},
+            "ar": {"الطقس", "درجة الحرارة", "توقعات"},
+        }
+        location_markers = {
+            "en": {"location", "where am i", "my location", "current location"},
+            "hi": {"लोकेशन", "स्थान", "मैं कहाँ हूँ"},
+            "ne": {"स्थान", "लोकेसन", "म कहाँ छु"},
+            "te": {"లోకేషన్", "నేను ఎక్కడ ఉన్నాను", "నా స్థానం"},
+            "ml": {"ലൊക്കേഷൻ", "ഞാൻ എവിടെയാണ്", "എന്റെ സ്ഥലം"},
+            "ar": {"موقعي", "الموقع", "أين أنا"},
+        }
+        thanks_markers = {
+            "en": {"thanks", "thank you"},
+            "hi": {"धन्यवाद", "शुक्रिया"},
+            "ne": {"धन्यवाद", "धन्यबाद"},
+            "te": {"ధన్యవాదాలు", "థాంక్స్"},
+            "ml": {"നന്ദി", "താങ്ക്സ്"},
+            "ar": {"شكرا", "شكرًا"},
+        }
+        confirmation_markers = {
+            "en": {"ok", "okay", "done", "alright", "fine"},
+            "hi": {"ठीक", "ठीक है", "हो गया"},
+            "ne": {"ठिक", "ठिक छ", "भयो"},
+            "te": {"సరే", "అయింది", "ఓకే"},
+            "ml": {"ശരി", "കഴിഞ്ഞു", "ഓകെ"},
+            "ar": {"تمام", "حسنًا", "حسنا", "تم"},
+        }
+
+        merged_date_markers = date_markers.get(language, set()) | date_markers["en"]
+        if matches_markers(merged_date_markers):
+            today = datetime.now().strftime("%A, %d %B %Y")
+            replies = {
+                "en": f"Today is {today}.",
+                "hi": f"आज की तारीख {today} है।",
+                "ne": f"आजको मिति {today} हो।",
+                "te": f"ఈరోజు తేదీ {today}.",
+                "ml": f"ഇന്നത്തെ തീയതി {today} ആണ്.",
+                "ar": f"تاريخ اليوم هو {today}.",
+            }
+            return replies.get(language, replies["en"])
+
+        merged_time_markers = time_markers.get(language, set()) | time_markers["en"]
+        if matches_markers(merged_time_markers):
+            now = datetime.now().strftime("%I:%M %p")
+            replies = {
+                "en": f"The current time is {now}.",
+                "hi": f"अभी समय {now} है।",
+                "ne": f"अहिले समय {now} हो।",
+                "te": f"ఇప్పుడు సమయం {now}.",
+                "ml": f"ഇപ്പോൾ സമയം {now} ആണ്.",
+                "ar": f"الوقت الآن هو {now}.",
+            }
+            return replies.get(language, replies["en"])
+
+        merged_location_markers = location_markers.get(language, set()) | location_markers["en"]
+        if matches_markers(merged_location_markers):
+            try:
+                snap = fetch_weather_snapshot()
+                city = snap.get("city") or ""
+                region = snap.get("region") or ""
+                country = snap.get("country") or ""
+                location_text = ", ".join(part for part in (city, region, country) if part)
+                if not location_text:
+                    raise ValueError("location unavailable")
+                replies = {
+                    "en": f"Your current location appears to be {location_text}.",
+                    "hi": f"आपकी वर्तमान लोकेशन {location_text} लग रही है।",
+                    "ne": f"तपाईंको हालको स्थान {location_text} देखिन्छ।",
+                    "te": f"మీ ప్రస్తుత స్థానం {location_text}గా కనిపిస్తోంది.",
+                    "ml": f"നിങ്ങളുടെ നിലവിലെ സ്ഥലം {location_text} എന്നാണ് കാണുന്നത്.",
+                    "ar": f"يبدو أن موقعك الحالي هو {location_text}.",
+                }
+                return replies.get(language, replies["en"])
+            except Exception:
+                fallback = {
+                    "en": "I could not fetch your current location right now.",
+                    "hi": "मैं अभी आपकी लोकेशन नहीं ला पाया।",
+                    "ne": "अहिले तपाईंको स्थान ल्याउन सकिन।",
+                    "te": "ప్రస్తుతం మీ లోకేషన్ పొందలేకపోయాను.",
+                    "ml": "ഇപ്പോൾ നിങ്ങളുടെ ലൊക്കേഷൻ ലഭ്യമാക്കാനായില്ല.",
+                    "ar": "تعذر جلب موقعك الحالي الآن.",
+                }
+                return fallback.get(language, fallback["en"])
+
+        merged_weather_markers = weather_markers.get(language, set()) | weather_markers["en"]
+        if matches_markers(merged_weather_markers):
+            try:
+                snap = fetch_weather_snapshot()
+                city = snap.get("city") or "your area"
+                desc = snap.get("desc") or ""
+                temp_c = snap.get("temp_c")
+                feels_c = snap.get("feels_c")
+                humidity = snap.get("humidity")
+                wind_kmph = snap.get("wind_kmph")
+                replies = {
+                    "en": f"Current weather in {city}: {desc}, temperature {temp_c} degree Celsius, feels like {feels_c}, humidity {humidity} percent, wind {wind_kmph} kilometers per hour.",
+                    "hi": f"{city} में अभी मौसम {desc} है, तापमान {temp_c} डिग्री सेल्सियस है, महसूस {feels_c}, नमी {humidity} प्रतिशत, हवा {wind_kmph} किलोमीटर प्रति घंटा।",
+                    "ne": f"{city} मा अहिले मौसम {desc} छ, तापक्रम {temp_c} डिग्री सेल्सियस, महसुस {feels_c}, आर्द्रता {humidity} प्रतिशत, हावा {wind_kmph} किलोमिटर प्रति घण्टा।",
+                    "te": f"{city}లో ప్రస్తుతం వాతావరణం {desc}, ఉష్ణోగ్రత {temp_c} డిగ్రీ సెల్సియస్, ఫీల్స్ లైక్ {feels_c}, ఆర్ద్రత {humidity} శాతం, గాలి వేగం గంటకు {wind_kmph} కిలోమీటర్లు.",
+                    "ml": f"{city}യിലെ ഇപ്പോഴത്തെ കാലാവസ്ഥ {desc} ആണ്, താപനില {temp_c} ഡിഗ്രി സെൽഷ്യസ്, അനുഭവപ്പെടുന്നത് {feels_c}, ഈർപ്പം {humidity} ശതമാനം, കാറ്റ് {wind_kmph} കിലോമീറ്റർ പ്രതി മണിക്കൂർ.",
+                    "ar": f"الطقس الحالي في {city}: {desc}، الحرارة {temp_c} درجة مئوية، المحسوسة {feels_c}، الرطوبة {humidity} بالمئة، والرياح {wind_kmph} كيلومتر في الساعة.",
+                }
+                return replies.get(language, replies["en"])
+            except Exception:
+                fallback = {
+                    "en": "I could not fetch weather details right now.",
+                    "hi": "मैं अभी मौसम की जानकारी नहीं ला पाया।",
+                    "ne": "अहिले मौसम जानकारी ल्याउन सकिन।",
+                    "te": "ప్రస్తుతం వాతావరణ వివరాలు పొందలేకపోయాను.",
+                    "ml": "ഇപ്പോൾ കാലാവസ്ഥ വിവരങ്ങൾ ലഭ്യമാക്കാനായില്ല.",
+                    "ar": "تعذر جلب تفاصيل الطقس الآن.",
+                }
+                return fallback.get(language, fallback["en"])
+
+        merged_thanks_markers = thanks_markers.get(language, set()) | thanks_markers["en"]
+        if matches_markers(merged_thanks_markers):
+            replies = {
+                "en": "You are welcome.",
+                "hi": "आपका स्वागत है।",
+                "ne": "तपाईंलाई स्वागत छ।",
+                "te": "మీకు స్వాగతం.",
+                "ml": "സ്വാഗതം.",
+                "ar": "على الرحب والسعة.",
+            }
+            return replies.get(language, replies["en"])
+
+        merged_confirmation_markers = confirmation_markers.get(language, set()) | confirmation_markers["en"]
+        if len(tokens) <= 3 and matches_markers(merged_confirmation_markers):
+            replies = {
+                "en": "Okay, done.",
+                "hi": "ठीक है, हो गया।",
+                "ne": "ठिक छ, भयो।",
+                "te": "సరే, అయింది.",
+                "ml": "ശരി, കഴിഞ്ഞു.",
+                "ar": "حسنًا، تم.",
+            }
+            return replies.get(language, replies["en"])
+
+        return None
+
     def process(
         self,
         text,
@@ -798,10 +1027,11 @@ class Tarz:
             )
 
         previous_task = self.current_task
+        is_social_turn = self._is_social_turn(normalized_text)
         detected_task = self._detect_task(normalized_text, intent)
         if detected_task is not None:
             self.current_task = detected_task
-        elif self._is_social_turn(normalized_text):
+        elif is_social_turn:
             self.current_task = None
         elif self._is_terse_followup(normalized_text):
             # Keep prior task lock for terse follow-ups like "flights".
@@ -869,12 +1099,83 @@ class Tarz:
             print(f"[DEBUG] History turns  : {len(hist) // 2} turns")
             print(f"{'─'*55}\n")
 
-        use_lead_words = config.TTS_LEAD_WORDS_IMMEDIATE and not bool(context_preface)
+        # Fast path: social-only turns should feel instant and should not repeat
+        # an additional LLM greeting after a spoken bridge.
+        if is_social_turn and detected_task is None and not vision_requested:
+            social_reply = context_preface
+            if not social_reply:
+                defaults = {
+                    "en": "Hi there. How can I help you?",
+                    "hi": "नमस्ते। मैं आपकी कैसे मदद कर सकता हूँ?",
+                    "ne": "नमस्ते। म कसरी सहयोग गर्न सक्छु?",
+                    "te": "నమస్కారం. నేను ఎలా సహాయం చేయగలను?",
+                    "ml": "നമസ്കാരം. ഞാൻ എങ്ങനെ സഹായിക്കാം?",
+                    "ar": "مرحبًا، كيف يمكنني مساعدتك؟",
+                }
+                social_reply = defaults.get(language, defaults["en"])
+
+            print(f"Tarz: {social_reply}")
+            self.tts.speak(social_reply, language)
+            self.llm.memory.set_language(language)
+            self.llm.memory.add_user(normalized_text)
+            self.llm.memory.add_assistant(social_reply)
+            self.llm.last_metrics = {
+                "first_token_ms": 0.0,
+                "total_latency_ms": 0.0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "tokens_per_second": None,
+                "first_request": False,
+                "cold_start_ttft_ms": None,
+            }
+
+            if turn is not None:
+                turn.update(output={"response": social_reply})
+            return
+
+        # Fast path: deterministic utility replies (time/thanks/confirmation)
+        # skip LLM for lower latency and consistent behavior.
+        utility_reply = None
+        # Utility fast path should not override content-task flows like story/joke/poem.
+        utility_allowed_tasks = {None, "weather"}
+        if not vision_requested and detected_task in utility_allowed_tasks:
+            utility_reply = self._utility_fast_response(normalized_text, language)
+        if utility_reply:
+            print(f"Tarz: {utility_reply}")
+            self.tts.speak(utility_reply, language)
+            self.llm.memory.set_language(language)
+            self.llm.memory.add_user(normalized_text)
+            self.llm.memory.add_assistant(utility_reply)
+            self.llm.last_metrics = {
+                "first_token_ms": 0.0,
+                "total_latency_ms": 0.0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "tokens_per_second": None,
+                "model": "utility-fastpath",
+                "first_request": False,
+                "cold_start_ttft_ms": None,
+            }
+            if turn is not None:
+                turn.update(output={"response": utility_reply})
+            return
+
+        # Natural continuity mode: avoid ultra-early partial chunks that can
+        # sound like broken words (especially in Indic scripts).
+        # Exception: when a preface is spoken, queue the first LLM chunk early
+        # so there is no audible gap after the filler.
+        fast_start_enabled = False
+        use_lead_words = False
         lead_words_count = config.TTS_LEAD_WORDS_COUNT
         first_chunk_min_chars = config.TTS_FIRST_CHUNK_MIN_CHARS
         first_chunk_min_words = config.TTS_FIRST_CHUNK_MIN_WORDS
-        first_sentence_immediately = config.TTS_FIRST_SENTENCE_IMMEDIATELY and not bool(context_preface)
-        first_word_immediately = config.TTS_FIRST_WORD_IMMEDIATELY and not bool(context_preface)
+        if context_preface:
+            # Emit the first stable phrase quickly after filler display.
+            first_chunk_min_chars = max(6, min(first_chunk_min_chars, 14))
+            first_chunk_min_words = max(1, min(first_chunk_min_words, 2))
+        # Always start TTS on the first sentence; first_chunk_min thresholds guard against tiny fragments.
+        first_sentence_immediately = True
+        first_word_immediately = False
 
         # Token queue for producer-consumer pattern between LLM and TTS threads.
         # Producer (LLM) puts tokens here; consumer (TTS sentence buffer) reads them.
@@ -962,6 +1263,8 @@ class Tarz:
             lead_words_immediate=use_lead_words,
             lead_words_count=lead_words_count,
             should_stop=self.tts.is_interrupted,
+            min_force_chars=config.TTS_MIN_FORCE_CHARS,
+            min_force_words=config.TTS_MIN_FORCE_WORDS,
         )
 
         # Accumulator for full TTS-synthesized response (sentences that actually got spoken).

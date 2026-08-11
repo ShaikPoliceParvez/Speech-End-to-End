@@ -12,11 +12,27 @@ from config import (
     SUPPORTED_LANGUAGES,
     DEFAULT_LANGUAGE,
     LLM_MODEL,
+    LLM_ENGLISH_MODEL,
+    LLM_INDIC_MODEL,
+    LLM_MULTILINGUAL_MODEL,
+    LLM_CAMERA_MODEL,
     LLM_MAX_TOKENS,
     LLM_SOCIAL_MAX_TOKENS,
+    LLM_ROUTINE_MAX_TOKENS,
+    LLM_KEEP_ALIVE,
+    LLM_TEMPERATURE,
+    LLM_TOP_K,
+    LLM_TOP_P,
+    LLM_REPEAT_PENALTY,
+    LLM_NUM_CTX,
+    LLM_INDIC_NUM_CTX,
     LLM_HISTORY_MODE,
     LLM_HISTORY_TURNS,
+    LLM_ROUTINE_HISTORY_TURNS,
 )
+
+
+_INDIC_LANGUAGES = {"hi", "ne", "te", "ml"}
 
 
 def _is_telugu_character(character):
@@ -87,7 +103,64 @@ def _filter_hindi_token(token, parenthetical_depth):
     return result, parenthetical_depth
 
 
+def _filter_english_token(token):
+    """Keep English turn output ASCII-clean for stable TTS pronunciation."""
+    filtered = []
+    for character in token:
+        if (
+            character.isascii()
+            and (
+                character.isalnum()
+                or character.isspace()
+                or character in ".,!?;:'\"()[]{}-_/"
+            )
+        ):
+            filtered.append(character)
+    result = "".join(filtered)
+    result = re.sub(r"\s+([.,!?;:])", r"\1", result)
+    return result
+
+
 class LLM:
+
+    _SARVAM_BASE: str = (
+        "You are Tarz, a fast multilingual offline travel assistant. "
+        "Answer directly. Do not start with filler like 'Sure' or 'Of course'. "
+        "Be concise by default. Expand only when the user asks for detail. "
+        "Do not hallucinate. If you do not know something, say so briefly."
+    )
+
+    # Compact per-language system prompts for sarvam-1.
+    _SARVAM_SYSTEM: dict = {
+        "hi": (
+            "The user's language is Hindi.\n"
+            "The user typed using the Latin script.\n"
+            "Interpret the text as Roman Hindi.\n"
+            "Respond ONLY in Hindi using Devanagari.\n"
+            "Never respond in Marathi or any other language.\n"
+            "Never mix Hindi with Marathi, Urdu, or English mid-response.\n"
+            "Never translate unless requested."
+        ),
+        "te": (
+            "You are Tarz. Reply only in Telugu script. "
+            "Understand Romanized Telugu input and respond in native Telugu. "
+            "Never use English words — write every word in Telugu script, including weather terms, numbers, and units. "
+            "Never switch to English mid-response unless the user explicitly mixes languages. "
+            "Be natural, concise. Start answers immediately."
+        ),
+        "ml": (
+            "You are Tarz. Reply only in Malayalam script (U+0D00–U+0D7F, not Tamil). "
+            "Understand Manglish input and respond in native Malayalam. "
+            "Never use English words — write every word in Malayalam script, including weather terms, numbers, and units. "
+            "Never switch to Tamil, English, or any other language mid-response unless the user explicitly mixes languages. "
+            "Be natural and concise."
+        ),
+        "ne": (
+            "You are Tarz. Reply only in Nepali Devanagari script. "
+            "Never mix with Hindi, English, or other languages unless the user explicitly mixes languages. "
+            "Be natural, concise, and conversational."
+        ),
+    }
 
     def __init__(self, model=None, tracer=None):
 
@@ -99,18 +172,84 @@ class LLM:
         self.model_startup_metrics = None
         self._first_request = True
 
+    @staticmethod
+    def _select_model(language, vision_requested=False):
+        # Vision/camera operations always use the camera-capable model.
+        if vision_requested:
+            return LLM_CAMERA_MODEL or LLM_MULTILINGUAL_MODEL or LLM_MODEL
+        # English always uses the lighter model.
+        if (language or "").lower() == "en":
+            return LLM_ENGLISH_MODEL or LLM_MODEL
+        # Indic languages use Sarvam for lower latency while preserving coverage.
+        if (language or "").lower() in _INDIC_LANGUAGES:
+            return LLM_INDIC_MODEL or LLM_MULTILINGUAL_MODEL or LLM_MODEL
+        return LLM_MULTILINGUAL_MODEL or LLM_MODEL
+
     def warmup(self):
         """Issue a tiny request so the first user turn starts faster."""
-        try:
-            ollama.chat(
-                model=self.model,
-                messages=[{"role": "user", "content": "hi"}],
-                stream=False,
-                options={"num_predict": 1},
-            )
-        except Exception:
-            # Warmup is best-effort and should never block startup.
-            pass
+        # Deduplicate while preserving load order: indic model last so it stays hot.
+        seen = set()
+        ordered = []
+        for m in [self.model, LLM_MULTILINGUAL_MODEL, LLM_CAMERA_MODEL, LLM_ENGLISH_MODEL, LLM_INDIC_MODEL]:
+            if m and m not in seen:
+                seen.add(m)
+                ordered.append(m)
+        for model_name in ordered:
+            if not model_name:
+                continue
+            # Non-indic models get a short keep_alive so they unload quickly,
+            # freeing CPU/RAM bandwidth for sarvam-1 which is the primary model.
+            ka = LLM_KEEP_ALIVE if model_name == LLM_INDIC_MODEL else "30s"
+            try:
+                ollama.chat(
+                    model=model_name,
+                    messages=[{"role": "user", "content": "hi"}],
+                    stream=False,
+                    keep_alive=ka,
+                    options={"num_predict": 1},
+                )
+            except Exception:
+                # Warmup is best-effort and should never block startup.
+                continue
+
+    @staticmethod
+    def _is_malformed_response(text: str) -> bool:
+        """Return True if the response looks like garbage and should be retried."""
+        t = (text or "").strip()
+        if not t:
+            return True
+
+        # Repeated phrases: any 10+ char sequence that appears 3+ times.
+        import re as _re
+        for m in _re.finditer(r"(.{10,})\1{2,}", t):
+            return True
+
+        # Placeholder / template garbage — only obvious unfilled templates.
+        placeholder_patterns = [
+            r"\{[A-Z_]{3,}\}",           # {FILL_HERE}, {PLACEHOLDER}
+            r"<[A-Z_]{3,}>",             # <MASK>, <TAG_NAME>
+            r"\bINSERT\b", r"\bFILL\b", r"\bPLACEHOLDER\b",
+            r"Lorem ipsum",
+        ]
+        for pattern in placeholder_patterns:
+            if _re.search(pattern, t, _re.IGNORECASE):
+                return True
+
+        # High ratio of garbage characters (box-drawing, control chars, random symbols).
+        total = len(t)
+        garbage = sum(
+            1 for c in t
+            if not (c.isalnum() or c.isspace() or c in ".,!?;:।…-–—'\"/()[]{}@#%&*+=" or ord(c) > 0x0600)
+        )
+        if total > 0 and garbage / total > 0.35:
+            return True
+
+        # Extremely low unique-character ratio (e.g. "aaaaaa..." or "???????").
+        unique = len(set(t.replace(" ", "")))
+        if total > 20 and unique < 4:
+            return True
+
+        return False
 
     @staticmethod
     def _history_explicitly_requested(prompt):
@@ -158,17 +297,57 @@ class LLM:
         }
         return any(keyword in text for keyword in keywords)
 
+    @staticmethod
+    def _wants_long_form_response(prompt):
+        text = (prompt or "").strip().lower()
+        if not text:
+            return False
+        long_form_markers = {
+            "story", "poem", "essay", "detailed", "in detail", "step by step",
+            "itinerary", "plan", "explain", "elaborate", "long",
+            # informational "tell me about X" patterns across all languages
+            "tell me about", "tell me more", "describe", "what is", "what are", "who is", "how does",
+            "gurinchi cheppu", "gurinchi", "guri nchi",
+            "ke bare mein", "ke baare mein", "batao", "bolo", "sunaiye", "sunao",
+            "patti para", "patti parayoo", "kurichu para",
+            "कहानी", "कविता", "विस्తार", "विस्तार से", "योजना", "बताओ", "सुनाइए", "के बारे में",
+            "कथा", "विस्तृत",
+            "కథ", "కవిత", "వివరంగా", "ప్లాన్", "ప్రణాళిక", "గురించి", "చెప్పు", "చెప్పండి",
+            "കഥ", "കവിത", "വിശദമായി", "പദ്ധതി", "പറ്റി", "പറയൂ",
+            "قصة", "قصيدة", "بالتفصيل", "خطة",
+        }
+        return any(marker in text for marker in long_form_markers)
+
+    @staticmethod
+    def _is_routine_turn(prompt):
+        text = (prompt or "").strip().lower()
+        if not text:
+            return False
+        routine_markers = {
+            "what time", "time now", "current time", "thanks", "thank you", "okay", "ok", "done", "confirm",
+            "कितने बजे", "समय", "धन्यवाद", "ठीक है",
+            "समय कति", "कति बजे", "धन्यवाद", "ठिक छ",
+            "ఎంత సమయం", "టైమ్", "ధన్యవాదాలు", "సరే",
+            "എത്ര മണി", "സമയം", "നന്ദി", "ശരി",
+            "كم الساعة", "الوقت", "شكرا", "تمام",
+        }
+        return any(marker in text for marker in routine_markers)
+
     def measure_model_startup(self):
         """Measure Ollama model readiness without generating a response."""
         start = time.perf_counter()
         try:
-            model_info = ollama.show(self.model)
+            model_info = ollama.show(LLM_CAMERA_MODEL or self.model)
             capabilities = getattr(model_info, "capabilities", None)
             if capabilities is None:
                 capabilities = model_info.get("capabilities", [])
             self._vision_supported = "vision" in capabilities
             self.model_startup_metrics = {
                 "model": self.model,
+                "english_model": LLM_ENGLISH_MODEL,
+                "indic_model": LLM_INDIC_MODEL,
+                "multilingual_model": LLM_MULTILINGUAL_MODEL,
+                "camera_model": LLM_CAMERA_MODEL,
                 "model_readiness_ms": round((time.perf_counter() - start) * 1000, 2),
                 "ready": True,
                 "vision_supported": self._vision_supported,
@@ -176,6 +355,10 @@ class LLM:
         except Exception as error:
             self.model_startup_metrics = {
                 "model": self.model,
+                "english_model": LLM_ENGLISH_MODEL,
+                "indic_model": LLM_INDIC_MODEL,
+                "multilingual_model": LLM_MULTILINGUAL_MODEL,
+                "camera_model": LLM_CAMERA_MODEL,
                 "model_readiness_ms": round((time.perf_counter() - start) * 1000, 2),
                 "ready": False,
                 "error": str(error),
@@ -186,7 +369,7 @@ class LLM:
     def supports_vision(self):
         if self._vision_supported is None:
             try:
-                model_info = ollama.show(self.model)
+                model_info = ollama.show(LLM_CAMERA_MODEL or self.model)
                 capabilities = getattr(model_info, "capabilities", None)
                 if capabilities is None:
                     capabilities = model_info.get("capabilities", [])
@@ -205,12 +388,13 @@ class LLM:
         language=None,
         allow_roman_output=False,
     ):
-
         social_turn = self._is_social_or_compliment_turn(prompt)
+        routine_turn = self._is_routine_turn(prompt)
 
         lang = (language or self.memory.get_language() or DEFAULT_LANGUAGE).lower()
         if lang not in SUPPORTED_LANGUAGES:
             lang = DEFAULT_LANGUAGE
+        selected_model = self._select_model(lang, vision_requested=vision_requested)
 
         self.memory.set_language(lang)
 
@@ -245,7 +429,18 @@ class LLM:
             return
 
         language_name = SUPPORTED_LANGUAGES.get(lang, "English")
-        if lang == "hi":
+
+        # sarvam-1 uses a compact prompt; base identity prepended to language rule.
+        if selected_model == LLM_INDIC_MODEL and lang in self._SARVAM_SYSTEM:
+            lang_rule = self._SARVAM_SYSTEM[lang]
+            if social_turn:
+                system_instruction = (
+                    self._SARVAM_BASE + " " + lang_rule
+                    + " Reply in one short natural sentence. Do not repeat greetings."
+                )
+            else:
+                system_instruction = self._SARVAM_BASE + " " + lang_rule
+        elif lang == "hi":
             if allow_roman_output:
                 system_instruction = (
                     "The user's conversation language is Hindi. "
@@ -347,75 +542,78 @@ class LLM:
 
         # The TTS bridge/preface is a latency-hiding spoken transition.
         # The model must ignore it semantically.
-        system_instruction += (
-            "A short conversational bridge may already be spoken before your generated response is heard. "
-            "That bridge exists only to hide latency and is not the actual answer. "
-            "The bridge is not the user message, not your response, not conversation history, not an instruction, and not additional context. "
-            "It must never influence your reasoning or intent understanding. "
-            "Ignore the bridge semantically: do not repeat it, paraphrase it, react to it, or answer it. "
-            "Do not acknowledge, continue, or generate another introductory sentence. "
-            "Do not infer intent from the bridge. Infer intent only from the current user message and conversation history. "
-            "Always respond to the MOST RECENT user message first. "
-            "Treat the conversation as continuous. Do not restart the conversation unless the user clearly starts a completely new topic. "
-            "The latest user intent has highest priority. "
-            "If previous conversational patterns conflict with the latest request, follow the latest request. "
-            "For direct actionable requests (for example: tell a story, translate this, solve this), start fulfilling the request immediately instead of delaying with unnecessary follow-up questions. "
-            "Never reuse a previous-turn response as the current reply. "
-            "Never answer an old question again when the user has already moved forward. "
-            "Always treat the latest user message as part of the ongoing conversation, not as a fresh start. "
-            "If the user is answering your previous question, acknowledge that answer naturally and move the conversation forward. "
-            "Do not repeat your previous question after the user has already answered it. "
-            "Do not mirror the user's answer as if it were your own state. "
-            "Do not repeat the same meaning twice in the same reply. "
-            "Do not add another bridge-like opener such as 'sure', 'certainly', 'okay', or 'let me help' unless essential. "
-            "Start with substantive continuation as early as possible. "
-            "For factual or task requests, continue directly with the answer, steps, story content, translation, or solution instead of re-announcing the action. "
-            "For greetings, compliments, or acknowledgements, continue naturally in a concise conversational way without repeating what was already acknowledged. "
-            "The user should feel an immediate and seamless response, while the bridge itself remains non-semantic filler. "
-        )
+        # Sarvam-1 already has a compact instruction built above; skip the verbose blocks.
+        if not (selected_model == LLM_INDIC_MODEL and lang in self._SARVAM_SYSTEM):
+            system_instruction += (
+                "A short conversational bridge may already be spoken before your generated response is heard. "
+                "That bridge exists only to hide latency and is not the actual answer. "
+                "The bridge is not the user message, not your response, not conversation history, not an instruction, and not additional context. "
+                "It must never influence your reasoning or intent understanding. "
+                "Ignore the bridge semantically: do not repeat it, paraphrase it, react to it, or answer it. "
+                "Do not acknowledge, continue, or generate another introductory sentence. "
+                "Do not infer intent from the bridge. Infer intent only from the current user message and conversation history. "
+                "Always respond to the MOST RECENT user message first. "
+                "Treat the conversation as continuous. Do not restart the conversation unless the user clearly starts a completely new topic. "
+                "The latest user intent has highest priority. "
+                "If previous conversational patterns conflict with the latest request, follow the latest request. "
+                "For direct actionable requests (for example: tell a story, translate this, solve this), start fulfilling the request immediately instead of delaying with unnecessary follow-up questions. "
+                "Never reuse a previous-turn response as the current reply. "
+                "Never answer an old question again when the user has already moved forward. "
+                "Always treat the latest user message as part of the ongoing conversation, not as a fresh start. "
+                "If the user is answering your previous question, acknowledge that answer naturally and move the conversation forward. "
+                "Do not repeat your previous question after the user has already answered it. "
+                "Do not mirror the user's answer as if it were your own state. "
+                "Do not repeat the same meaning twice in the same reply. "
+                "Do not add another bridge-like opener such as 'sure', 'certainly', 'okay', or 'let me help' unless essential. "
+                "Start with substantive continuation as early as possible. "
+                "For factual or task requests, continue directly with the answer, steps, story content, translation, or solution instead of re-announcing the action. "
+                "For greetings, compliments, or acknowledgements, continue naturally in a concise conversational way without repeating what was already acknowledged. "
+                "The user should feel an immediate and seamless response, while the bridge itself remains non-semantic filler. "
+            )
 
-        if social_turn:
-            # Keep social-turn instructions compact to reduce TTFT for greetings.
-            system_instruction += (
-                "You are Tarz. Never claim your name is anything else. "
-                "Reply naturally in the selected language as one short flowing conversational sentence when possible. "
-                "When combining an acknowledgement with a follow-up question, keep it in one sentence using natural connector punctuation (usually a comma) instead of splitting into two sentences with a period. "
-                "Do not repeat acknowledgement content more than once. "
-                "If the user message is a greeting, avoid repeating another greeting and continue directly with a helpful next-question or continuation. "
-                "Do not continue any previous story or task context unless explicitly asked. "
-                "Keep it under about 35 words and avoid literal translation artifacts. "
-            )
-        else:
-            # Keep simple answers concise, but let creative requests have enough
-            # room to feel complete rather than ending after an acknowledgement.
-            system_instruction += (
-                "You are Tarz. Never claim your name is anything else. "
-                " Keep simple factual answers short, clear, and complete. "
-                "Use grammatically correct, natural native phrasing for the selected language in every reply. "
-                "For greetings and small-talk (for example: hi, hello, how are you), respond in 1-2 short natural conversational sentences. "
-                "Do not use literal translated grammar or broken forms. "
-                "Examples of desired tone: Telugu -> 'నేను బాగున్నాను. మీరు ఎలా ఉన్నారు?'; Hindi -> 'मैं ठीक हूँ। आप कैसे हैं?'. "
-                "For the ENTIRE response, keep every sentence fluent and native in grammar, word order, and idiom. "
-                "Do not mix languages unless the user explicitly asks for mixed output. "
-                "Do not mirror user typos or malformed grammar; correct them and answer naturally. "
-                "Before finishing, self-check that the whole reply reads like a native speaker wrote it. "
-                "For practical tasks (planning, recommendations, translation, search-style help), provide concrete and useful details, not just a short acknowledgement. "
-                "If the request is underspecified, ask exactly one concise clarifying question. "
-                "Use the conversation history silently to maintain context and continuity — for example, remembering a destination, topic, or preference the user already stated. "
-                "Do NOT proactively mention, quote, or summarise previous responses unless the current message is a direct follow-up to them or the user explicitly asks about earlier content. "
-                "If the current message is only a greeting, compliment, or acknowledgement, reply briefly and naturally, and do not continue prior stories or tasks. "
-                "Always prioritize the user's current message over prior creative context. "
-                "If the current user message is a follow-up (for example: also, add this, include flights, for the trip), continue the same task directly. "
-                "Do not switch to stories, poems, or fictional content unless the CURRENT user message explicitly asks for a story or poem. "
-                "When the user requests a story, begin the story immediately instead of only confirming that you can tell one. "
-                "Do not insert unrelated wellbeing/small-talk lines (for example, 'I am fine, how are you') before starting the requested story. "
-                "Write a complete short story with a beginning, development, and ending in several short paragraphs. "
-                "For numbered plans, use consecutive numbers exactly once and put "
-                "each item on its own line. For an N-day itinerary, provide Day 1 "
-                "through Day N without skipping or repeating days. Do not output a "
-                "number by itself, and do not invent uncertain place names. "
-                "When user says hi,hello or greets, do not greet back and go directly to the next question or continuation."
-            )
+            if social_turn:
+                # Keep social-turn instructions compact to reduce TTFT for greetings.
+                system_instruction += (
+                    "You are Tarz. Never claim your name is anything else. "
+                    "Reply naturally in the selected language as one short flowing conversational sentence when possible. "
+                    "When combining an acknowledgement with a follow-up question, keep it in one sentence using natural connector punctuation (usually a comma) instead of splitting into two sentences with a period. "
+                    "Do not repeat acknowledgement content more than once. "
+                    "If the user message is a greeting, do not greet back with words like hello, hi, greetings, welcome, or namaste. "
+                    "Acknowledge briefly and continue directly to one helpful follow-up question. "
+                    "Do not continue any previous story or task context unless explicitly asked. "
+                    "Keep it under about 35 words and avoid literal translation artifacts. "
+                )
+            else:
+                # Keep simple answers concise, but let creative requests have enough
+                # room to feel complete rather than ending after an acknowledgement.
+                system_instruction += (
+                    "You are Tarz. Never claim your name is anything else. "
+                    " Keep simple factual answers short, clear, and complete. "
+                    "Use grammatically correct, natural native phrasing for the selected language in every reply. "
+                    "For greetings and small-talk (for example: hi, hello, how are you), respond in 1-2 short natural conversational sentences. "
+                    "Do not use literal translated grammar or broken forms. "
+                    "Examples of desired tone: Telugu -> 'నేను బాగున్నాను. మీరు ఎలా ఉన్నారు?'; Hindi -> 'मैं ठीक हूँ। आप कैसे हैं?'. "
+                    "For the ENTIRE response, keep every sentence fluent and native in grammar, word order, and idiom. "
+                    "Do not mix languages unless the user explicitly asks for mixed output. "
+                    "Do not mirror user typos or malformed grammar; correct them and answer naturally. "
+                    "Before finishing, self-check that the whole reply reads like a native speaker wrote it. "
+                    "For practical tasks (planning, recommendations, translation, search-style help), provide concrete and useful details, not just a short acknowledgement. "
+                    "If the request is underspecified, ask exactly one concise clarifying question. "
+                    "Use the conversation history silently to maintain context and continuity — for example, remembering a destination, topic, or preference the user already stated. "
+                    "Do NOT proactively mention, quote, or summarise previous responses unless the current message is a direct follow-up to them or the user explicitly asks about earlier content. "
+                    "If the current message is only a greeting, compliment, or acknowledgement, reply briefly and naturally, and do not continue prior stories or tasks. "
+                    "Always prioritize the user's current message over prior creative context. "
+                    "If the current user message is a follow-up (for example: also, add this, include flights, for the trip), continue the same task directly. "
+                    "Do not switch to stories, poems, or fictional content unless the CURRENT user message explicitly asks for a story or poem. "
+                    "When the user requests a story, begin the story immediately instead of only confirming that you can tell one. "
+                    "Do not insert unrelated wellbeing/small-talk lines (for example, 'I am fine, how are you') before starting the requested story. "
+                    "Write a complete short story with a beginning, development, and ending in several short paragraphs. "
+                    "For numbered plans, use consecutive numbers exactly once and put "
+                    "each item on its own line. For an N-day itinerary, provide Day 1 "
+                    "through Day N without skipping or repeating days. Do not output a "
+                    "number by itself, and do not invent uncertain place names. "
+                    "When user says hi,hello or greets, do not greet back and go directly to the next question or continuation."
+                )
 
         messages = [{
             "role": "system",
@@ -426,9 +624,14 @@ class LLM:
         include_history = LLM_HISTORY_MODE == "full"
         if LLM_HISTORY_MODE == "strict":
             include_history = self._history_explicitly_requested(prompt)
+        if social_turn:
+            # Social turns do not need historical context; keep prompts small for faster TTFT.
+            include_history = False
 
         if include_history:
             window = max(0, int(LLM_HISTORY_TURNS)) * 2
+            if routine_turn:
+                window = min(window, max(0, int(LLM_ROUTINE_HISTORY_TURNS)) * 2)
             if window > 0:
                 messages.extend(history[-window:])
 
@@ -473,13 +676,22 @@ class LLM:
         usage_details = {}
         request_start = time.perf_counter()
         first_token_ms = None
+        _t_first_token = None
         is_first_request = self._first_request
         telugu_parenthetical_depth = 0
         hindi_parenthetical_depth = 0
+        if social_turn:
+            num_predict = min(LLM_SOCIAL_MAX_TOKENS, LLM_MAX_TOKENS)
+        elif self._wants_long_form_response(prompt):
+            num_predict = LLM_MAX_TOKENS
+        elif routine_turn:
+            num_predict = min(LLM_ROUTINE_MAX_TOKENS, LLM_MAX_TOKENS)
+        else:
+            num_predict = min(256, LLM_MAX_TOKENS)
 
         generation = (
             self.tracer.start_generation(
-                self.model,
+                selected_model,
                 messages,
                 model_parameters={"max_tokens": LLM_MAX_TOKENS},
             )
@@ -490,14 +702,28 @@ class LLM:
         with generation if generation is not None else nullcontext(None) as observation:
             if self.tracer is not None:
                 self.tracer.record_event(observation, "LLM Streaming Started")
+
             response = ollama.chat(
-                model=self.model,
+                model=selected_model,
                 messages=messages,
                 stream=True,
+                keep_alive=LLM_KEEP_ALIVE,
                 options={
-                    "num_predict": min(LLM_SOCIAL_MAX_TOKENS, LLM_MAX_TOKENS) if social_turn else LLM_MAX_TOKENS,
+                    "num_predict": num_predict,
+                    "temperature": LLM_TEMPERATURE,
+                    "top_k": LLM_TOP_K,
+                    "top_p": LLM_TOP_P,
+                    "repeat_penalty": LLM_REPEAT_PENALTY,
+                    "num_ctx": LLM_INDIC_NUM_CTX if selected_model == LLM_INDIC_MODEL else LLM_NUM_CTX,
                 },
             )
+
+            # Tokens yielded immediately as they arrive — no full-response buffering.
+            # Early-abort: if the first 20 yielded tokens look like pure garbage, stop
+            # streaming and let the post-stream malformed check trigger a silent retry.
+            _early_abort = False
+            _tokens_seen = 0
+            _EARLY_ABORT_WINDOW = 20
 
             for chunk in response:
 
@@ -509,7 +735,11 @@ class LLM:
                     usage_details["output_tokens"] = chunk["eval_count"]
 
                 token = raw_token
-                if lang in {"hi", "ne"}:
+                if lang == "en":
+                    token = _filter_english_token(raw_token)
+                    if not token:
+                        continue
+                elif lang in {"hi", "ne"}:
                     token, hindi_parenthetical_depth = _filter_hindi_token(
                         raw_token,
                         hindi_parenthetical_depth,
@@ -535,21 +765,29 @@ class LLM:
                         continue
 
                 assistant += token
+                _tokens_seen += 1
+
+                # Early garbage abort: check window once before first real content.
+                if _tokens_seen == _EARLY_ABORT_WINDOW and not saw_first_token:
+                    if self._is_malformed_response(assistant):
+                        print("[LLM] Early garbage detected — aborting stream for retry.")
+                        _early_abort = True
+                        break
 
                 if not saw_first_token:
-                    first_token_ms = round((time.perf_counter() - request_start) * 1000, 2)
+                    _t_first_token = time.perf_counter()
+                    first_token_ms = round((_t_first_token - request_start) * 1000, 2)
                     if self.tracer is not None:
                         self.tracer.record_event(
                             observation,
                             "LLM First Token Received",
                             {"ttft_ms": first_token_ms},
                         )
+                    if on_event is not None:
+                        on_event("LLM_FIRST_TOKEN", {"token": token})
+                    saw_first_token = True
 
                 if on_event is not None:
-                    if not saw_first_token:
-                        on_event("LLM_FIRST_TOKEN", {"token": token})
-                        saw_first_token = True
-
                     on_event("LLM_TOKEN", {
                         "token": token,
                         "text": assistant,
@@ -560,17 +798,128 @@ class LLM:
 
                 yield token
 
-            if lang == "te" and not any(_is_telugu_character(character) for character in assistant):
-                assistant = "క్షమించండి, దయచేసి మీ ప్రశ్నను మళ్లీ అడగండి."
-                if first_token_ms is None:
-                    first_token_ms = round((time.perf_counter() - request_start) * 1000, 2)
-                if on_event is not None:
-                    on_event("LLM_FIRST_TOKEN", {"token": assistant})
-                    on_event("LLM_TOKEN", {"token": assistant, "text": assistant})
-                    on_event("LLM_STREAMING", {"token": assistant})
-                yield assistant
-            elif lang in {"hi", "ne"} and not any(_is_devanagari_character(character) for character in assistant):
-                assistant = "क्षमा करें, कृपया अपना प्रश्न फिर से पूछें।" if lang == "hi" else "माफ गर्नुहोस्, कृपया आफ्नो प्रश्न फेरि सोध्नुहोस्।"
+            script_missing = (
+                (lang == "te" and not any(_is_telugu_character(character) for character in assistant))
+                or (lang in {"hi", "ne"} and not any(_is_devanagari_character(character) for character in assistant))
+                or (lang == "en" and not any(character.isascii() and character.isalpha() for character in assistant))
+            )
+
+            # Reject garbage/malformed output and retry once on the same model.
+            # Retry is silent (no yield) — TTS already received the streamed content.
+            # On early-abort the assistant buffer is small garbage; on post-stream
+            # detection the TTS has finished speaking; either way we update memory only.
+            if self._is_malformed_response(assistant):
+                print("[LLM] Malformed response — retrying silently for memory.")
+                try:
+                    retry_resp = ollama.chat(
+                        model=selected_model,
+                        messages=messages,
+                        stream=True,
+                        keep_alive=LLM_KEEP_ALIVE,
+                        options={
+                            "num_predict": num_predict,
+                            "temperature": min(LLM_TEMPERATURE + 0.1, 1.0),
+                            "top_k": LLM_TOP_K,
+                            "top_p": LLM_TOP_P,
+                            "repeat_penalty": LLM_REPEAT_PENALTY,
+                            "num_ctx": LLM_INDIC_NUM_CTX if selected_model == LLM_INDIC_MODEL else LLM_NUM_CTX,
+                        },
+                    )
+                    retry_text = "".join(
+                        (rc.get("message", {}).get("content", "") if isinstance(rc, dict) else rc["message"]["content"])
+                        for rc in retry_resp
+                    )
+                    if retry_text.strip():
+                        assistant = retry_text
+                except Exception as _retry_err:
+                    print(f"[LLM] Silent retry failed: {_retry_err}")
+
+            if script_missing:
+                # If the chosen model fails script-lock output, retry once with the
+                # stronger multilingual model before giving a fallback apology.
+                fallback_model = LLM_MULTILINGUAL_MODEL or LLM_MODEL
+                if fallback_model and fallback_model != selected_model:
+                    try:
+                        fallback_response = ollama.chat(
+                            model=fallback_model,
+                            messages=messages,
+                            stream=True,
+                            keep_alive=LLM_KEEP_ALIVE,
+                            options={
+                                "num_predict": num_predict,
+                                "temperature": LLM_TEMPERATURE,
+                                "top_k": LLM_TOP_K,
+                                "top_p": LLM_TOP_P,
+                                "repeat_penalty": LLM_REPEAT_PENALTY,
+                                "num_ctx": LLM_NUM_CTX,
+                            },
+                        )
+                        fallback_text = ""
+                        fallback_parenthetical_depth = 0
+                        fallback_emitted = False
+                        for fb_chunk in fallback_response:
+                            raw_fb_token = (fb_chunk.get("message") or {}).get("content", "")
+                            fb_token = raw_fb_token
+                            if lang == "te":
+                                fb_token, fallback_parenthetical_depth = _filter_telugu_token(
+                                    raw_fb_token,
+                                    fallback_parenthetical_depth,
+                                )
+                                if not fb_token:
+                                    continue
+                                if (
+                                    not any(_is_telugu_character(character) or character.isdigit() for character in fb_token)
+                                    and not any(_is_telugu_character(character) for character in fallback_text)
+                                ):
+                                    continue
+                            elif lang in {"hi", "ne"}:
+                                fb_token, fallback_parenthetical_depth = _filter_hindi_token(
+                                    raw_fb_token,
+                                    fallback_parenthetical_depth,
+                                )
+                                if not fb_token:
+                                    continue
+                                if (
+                                    not any(_is_devanagari_character(character) or character.isdigit() for character in fb_token)
+                                    and not any(_is_devanagari_character(character) for character in fallback_text)
+                                ):
+                                    continue
+                            elif lang == "en":
+                                fb_token = _filter_english_token(raw_fb_token)
+                                if not fb_token:
+                                    continue
+
+                            fallback_text += fb_token
+                            if first_token_ms is None:
+                                first_token_ms = round((time.perf_counter() - request_start) * 1000, 2)
+
+                            if on_event is not None and not saw_first_token:
+                                on_event("LLM_FIRST_TOKEN", {"token": fb_token})
+                                saw_first_token = True
+
+                            if on_event is not None:
+                                on_event("LLM_TOKEN", {"token": fb_token, "text": assistant + fallback_text})
+                                on_event("LLM_STREAMING", {"token": fb_token})
+
+                            yield fb_token
+                            fallback_emitted = True
+
+                        if fallback_emitted:
+                            assistant = fallback_text
+                            usage_details["fallback_model_used"] = fallback_model
+                            script_missing = False
+                    except Exception:
+                        pass
+
+            if script_missing:
+                if lang == "te":
+                    assistant = "క్షమించండి, దయచేసి మీ ప్రశ్నను మళ్లీ అడగండి."
+                elif lang == "hi":
+                    assistant = "क्षमा करें, कृपया अपना प्रश्न फिर से पूछें।"
+                elif lang == "en":
+                    assistant = "Sorry, could you please ask that again?"
+                else:
+                    assistant = "माफ गर्नुहोस्, कृपया आफ्नो प्रश्न फेरि सोध्नुहोस्।"
                 if first_token_ms is None:
                     first_token_ms = round((time.perf_counter() - request_start) * 1000, 2)
                 if on_event is not None:
@@ -581,6 +930,7 @@ class LLM:
 
             total_latency_ms = round((time.perf_counter() - request_start) * 1000, 2)
             output_tokens = usage_details.get("output_tokens", 0)
+
             self.last_metrics = {
                 "first_token_ms": first_token_ms,
                 "total_latency_ms": total_latency_ms,
@@ -590,6 +940,8 @@ class LLM:
                     output_tokens / max(total_latency_ms / 1000, 0.001),
                     2,
                 ) if output_tokens else None,
+                "model": usage_details.get("fallback_model_used") or selected_model,
+                "primary_model": selected_model,
                 "first_request": is_first_request,
                 "cold_start_ttft_ms": first_token_ms if is_first_request else None,
             }
@@ -808,11 +1160,13 @@ def sentence_stream(
 
             # For low-latency voice replies, do not wait for punctuation before
             # emitting the very first chunk when enough text has arrived.
+            # Use ' ' in cleaned (not buffer) so leading-space Indic tokens like
+            # " నీ" don't trigger emission mid-word before "కు" arrives.
             if (
                 first_sentence_immediately
                 and not has_emitted
                 and (len(cleaned) >= first_chunk_min_chars or words >= first_chunk_min_words)
-                and buffer[-1].isspace()
+                and " " in cleaned
             ):
                 sentence = cleaned
                 buffer = ""

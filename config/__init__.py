@@ -41,11 +41,25 @@ from config.app_config import app_settings
 
 # LLM
 LLM_MODEL                 = llm_settings.LLM_MODEL
+LLM_ENGLISH_MODEL         = llm_settings.LLM_ENGLISH_MODEL
+LLM_INDIC_MODEL           = llm_settings.LLM_INDIC_MODEL
+LLM_MULTILINGUAL_MODEL    = llm_settings.LLM_MULTILINGUAL_MODEL
+LLM_CAMERA_MODEL          = llm_settings.LLM_CAMERA_MODEL
+LLM_AVAILABLE_MODELS      = llm_settings.LLM_AVAILABLE_MODELS
 LLM_MAX_TOKENS            = llm_settings.LLM_MAX_TOKENS
 LLM_SOCIAL_MAX_TOKENS     = llm_settings.LLM_SOCIAL_MAX_TOKENS
+LLM_ROUTINE_MAX_TOKENS    = llm_settings.LLM_ROUTINE_MAX_TOKENS
 LLM_WARMUP_ON_STARTUP     = llm_settings.LLM_WARMUP_ON_STARTUP
+LLM_KEEP_ALIVE            = llm_settings.LLM_KEEP_ALIVE
+LLM_TEMPERATURE           = llm_settings.LLM_TEMPERATURE
+LLM_TOP_K                 = llm_settings.LLM_TOP_K
+LLM_TOP_P                 = llm_settings.LLM_TOP_P
+LLM_REPEAT_PENALTY        = llm_settings.LLM_REPEAT_PENALTY
+LLM_NUM_CTX               = llm_settings.LLM_NUM_CTX
+LLM_INDIC_NUM_CTX         = llm_settings.LLM_INDIC_NUM_CTX
 LLM_HISTORY_MODE          = llm_settings.LLM_HISTORY_MODE
 LLM_HISTORY_TURNS         = llm_settings.LLM_HISTORY_TURNS
+LLM_ROUTINE_HISTORY_TURNS = llm_settings.LLM_ROUTINE_HISTORY_TURNS
 
 # STT / Whisper
 STT_MODEL                           = stt_settings.STT_MODEL
@@ -93,6 +107,8 @@ TTS_FIRST_SENTENCE_WORD_CHUNK_SIZE = tts_settings.TTS_FIRST_SENTENCE_WORD_CHUNK_
 TTS_CHUNK_ON_MINOR_PUNCTUATION  = tts_settings.TTS_CHUNK_ON_MINOR_PUNCTUATION
 TTS_LEAD_WORDS_IMMEDIATE        = tts_settings.TTS_LEAD_WORDS_IMMEDIATE
 TTS_LEAD_WORDS_COUNT            = tts_settings.TTS_LEAD_WORDS_COUNT
+TTS_MIN_FORCE_CHARS             = tts_settings.TTS_MIN_FORCE_CHARS
+TTS_MIN_FORCE_WORDS             = tts_settings.TTS_MIN_FORCE_WORDS
 TTS_CONTEXT_PREFACE_ENABLED     = tts_settings.TTS_CONTEXT_PREFACE_ENABLED
 TTS_CONTEXT_PREFACE_RANDOM      = tts_settings.TTS_CONTEXT_PREFACE_RANDOM
 TTS_PREFACE_PACING              = tts_settings.TTS_PREFACE_PACING

@@ -56,6 +56,7 @@ _ROMAN_LANGUAGE_VOCABULARY = {
     # Pronouns
     "mai", "main", "me", "mein", "maii",
     "mujhe", "muje", "mujhko", "mjh", "mjhe",
+        "mene", "maine",
     "ham", "hum", "hme", "hume", "humko",
     "aap", "ap", "aapko", "apko",
     "tum", "tm", "tumhe", "tumko", "tujhe",
@@ -76,7 +77,9 @@ _ROMAN_LANGUAGE_VOCABULARY = {
     "tha", "thi", "the",
     "kar", "karo", "karna", "karni",
     "karta", "karti", "karte",
+        "sunliya", "sunli", "sunaa", "suna",
     "kiya", "kiye", "ki",
+        "liya", "li",
     "bol", "bolo", "bolna",
     "bata", "batao", "batana",
     "sun", "suno", "sunao",
@@ -168,6 +171,7 @@ _ROMAN_LANGUAGE_VOCABULARY = {
         {
         # Pronouns
         "nenu", "nen", "nuvvu", "nuvu", "nvu",
+        "nuv",
         "meeru", "meru", "manam", "memu",
         "atanu", "vadu", "vaadu", "vad", "vd",
         "ame", "aame",
@@ -195,7 +199,9 @@ _ROMAN_LANGUAGE_VOCABULARY = {
 
         # Common verbs
         "cheppu", "chepu", "chepp", "cheppandi",
+        "cheppavu", "cheppava", "cheppavura",
         "chepta", "cheptanu", "cheptava",
+        "chestava", "chesthava",
         "cheppu ra", "cheppu anna",
 
         "chey", "cheyyi", "cheyi", "cheyy",
@@ -222,6 +228,7 @@ _ROMAN_LANGUAGE_VOCABULARY = {
         "teliyali", "vinu", "vinandi",
         "chudu", "choodu", "choosava",
         "kavali", "kaavali",
+        "sahayam",
         "ivvu", "ivvandi",
 
         # Time
@@ -240,6 +247,7 @@ _ROMAN_LANGUAGE_VOCABULARY = {
         "dhanyavadalu", "thanks",
 
         # Casual slang
+        "balega", "balegaa", "balegara", "balegandi",
         "anna", "ayya", "bro", "bros",
         "bava", "mama", "mowa",
         "rey", "ra", "raa", "orey",
@@ -254,10 +262,11 @@ _ROMAN_LANGUAGE_VOCABULARY = {
 
         # Daily usage
         "tinava", "tinnava",
-        "tinnara", "paduko",
+        "tinnara", "paduko", "padkuntanu", "padukuntanu", "padkunta", "padukunta",
         "nidra", "intiki",
         "bayata", "school",
         "college", "office",
+            "kachitanga", "kacchitanga", "cheddam", "chedham",
 
         # Mixed English-Telugu
         "wifi", "internet",
@@ -319,6 +328,13 @@ _NEPALI_DEVANAGARI_HINTS = frozenset({
 _HINDI_DEVANAGARI_HINTS = frozenset({
     "आप", "तुम", "मुझे", "मेरा", "मेरी", "हम", "क्यों", "कैसे", "कहाँ", "कब",
     "हूँ", "हैं", "है", "करो", "करना", "बताओ", "धन्यवाद", "कृपया", "हिंदी",
+})
+
+_TELUGU_ROMAN_STRONG_HINTS = frozenset({
+    "ela", "unnaru", "unnava", "naku", "naaku", "nuv", "nuvvu", "cheppu",
+    "cheppavu", "cheppava", "balega", "balegaa", "balegara",
+    "nenu", "meeru", "padkuntanu", "padukuntanu", "padkunta",
+    "cheppagalava", "cheppagalara", "katha", "sahayam", "inka", "alaga", "oho", "namaskaram",
 })
 
 
@@ -481,6 +497,12 @@ def resolve_language(
 
     if roman_language:
         return {"language": roman_language, "script": script, "reason": "roman_vocabulary"}
+
+    # Telugu Roman colloquial phrases are often short and can tie with shared
+    # social words. Detect these strongly before falling back to previous lang.
+    telugu_hint_hits = sum(token in _TELUGU_ROMAN_STRONG_HINTS for token in latin_tokens)
+    if telugu_hint_hits >= 2:
+        return {"language": "te", "script": script, "reason": "telugu_roman_strong_hints"}
 
     # If any language vocabulary matched (even tied), prefer conversation history
     # over the English fallback — single shared words like greetings should stay

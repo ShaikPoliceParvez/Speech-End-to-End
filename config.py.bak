@@ -1,7 +1,20 @@
 # ========= MODELS =========
 
 STT_MODEL = "whisper"      # whisper | parakeet
-LLM_MODEL = "gemma3:4b" # qwen2.5:3b, gemma3:4b, qwen2.5:1.5b, gemma2:2b-instruct-q2_K is also available.
+LLM_MODEL = "gemma3:4b"
+LLM_ENGLISH_MODEL = "qwen2.5:1.5b"
+LLM_INDIC_MODEL = "mashriram/sarvam-1"
+LLM_MULTILINGUAL_MODEL = "gemma3:4b"
+LLM_CAMERA_MODEL = "gemma3:4b"
+# Reference list so users can quickly replace/experiment.
+LLM_AVAILABLE_MODELS = [
+	"qwen2.5:1.5b",
+	"mashriram/sarvam-1",
+	"gemma3:4b",
+	"qwen2.5:3b",
+	"gemma2:2b",
+	"gemma2:2b-instruct-q2_K",
+]
 VOICE = "F2" 				 # M1 | M2 | F1 | F2 | F3 | F4 | F5 | F6
 
 # ========= LLM RESPONSE LENGTH =========
