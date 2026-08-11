@@ -5,6 +5,8 @@ num2words
 numpy
 ollama
 opencv-python
+pydantic
+pydantic-settings
 pillow
 piper-tts
 psutil
@@ -14,7 +16,7 @@ soundfile
 supertonic
 
 # Optional: IndicConformer for higher-accuracy Hindi / Telugu / Malayalam STT
-# Requires STT_INDIC_ASR_ENABLED = True in config.py (default).
+# Requires STT_INDIC_ASR_ENABLED = True in config/stt_config.py (default).
 # Falls back to Whisper automatically if not installed.
 # onnxruntime
 # torch

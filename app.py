@@ -71,14 +71,14 @@ import threading
 import queue
 import random
 import re
-from microphone import Microphone
-from stt import STT
-from router import Router
-from llm import LLM, sentence_stream
-from tts_router import TTSRouter
-from camera import Camera
-from language import detect_dominant_language, normalize_text, detect_script
-from tracing import LangfuseTracer
+from audio.microphone import Microphone
+from stt.stt import STT
+from core.router import Router
+from llm.llm import LLM, sentence_stream
+from tts.tts_router import TTSRouter
+from camera.camera import Camera
+from core.language import detect_dominant_language, normalize_text, detect_script
+from core.tracing import LangfuseTracer
 
 
 class Tarz:
@@ -105,6 +105,8 @@ class Tarz:
         "కూడా", "ఇంకా", "అలాగే", "అదనంగా",
         # Hindi continuation signals
         "भी", "और", "के अलावा", "इसके",
+        # Nepali continuation signals
+        "पनि", "अझै", "थप", "र", "pani", "ajhai", "thap", "ra",
         # Malayalam continuation signals
         "കൂടി", "കൂടെ", "ഇനിയും",
     }
@@ -115,19 +117,19 @@ class Tarz:
     # enables task-lock mode where follow-ups remain in context (e.g., "flights" stays in travel mode).
     # Supports all 5 languages: English, Hindi, Telugu, Malayalam, Arabic.
     TASK_KEYWORDS = {
-        "story": {"story", "katha", "kahani", "कहानी", "कथा", "కథ", "حكاية", "قصة"},
-        "joke": {"joke", "funny", "मजाक", "चुटकुला", "జోక్", "തമാശ", "نكتة"},
-        "poem": {"poem", "poetry", "shayari", "कविता", "शायरी", "కవిత", "قصيدة"},
+        "story": {"story", "katha", "kahani", "कहानी", "कथा", "కథ", "कथा", "nepali katha", "कहानी सुनाउ", "حكاية", "قصة"},
+        "joke": {"joke", "funny", "मजाक", "चुटकुला", "జోక్", "ठट्टा", "thatta", "തമാശ", "نكتة"},
+        "poem": {"poem", "poetry", "shayari", "कविता", "शायरी", "కవిత", "कविता", "kabita", "قصيدة"},
         "travel": {
             "trip", "travel", "itinerary", "flight", "flights", "ticket", "tickets",
             "airfare", "hotel", "stay", "bombay", "mumbai", "tour",
         },
-        "weather": {"weather", "forecast", "temperature", "मौसम", "వాతావరణం", "الطقس"},
-        "news": {"news", "headlines", "समाचार", "వార్తలు", "أخبار"},
+        "weather": {"weather", "forecast", "temperature", "मौसम", "वातावरण", "వాతావరణం", "mausam", "الطقس"},
+        "news": {"news", "headlines", "समाचार", "వార్తలు", "समाचार", "samachar", "أخبار"},
         "coding": {"code", "coding", "program", "python", "bug", "debug", "fix", "script"},
-        "math": {"math", "calculate", "equation", "sum", "multiply", "divide", "गणना", "లెక్క"},
+        "math": {"math", "calculate", "equation", "sum", "multiply", "divide", "गणना", "हिसाब", "hisab", "లెక్క"},
         "camera": {"camera", "photo", "image", "picture", "ocr", "read this"},
-        "translation": {"translate", "translation", "अनुवाद", "అనువాదం", "ترجمة"},
+        "translation": {"translate", "translation", "अनुवाद", "అనువాదం", "अनुवाद", "anuwad", "ترجمة"},
     }
 
     # SOCIAL_TOKENS: Vocabulary identifying small-talk/greetings (hi, hello, thanks, etc).
@@ -139,6 +141,7 @@ class Tarz:
         "hi", "hello", "hey", "namaste", "नमस्ते", "नमस्कार",
         "hii", "heyy", "yo", "ok", "okay", "thanks", "thank", "wow", "great",
         "thik", "theek", "ठीक",
+        "धन्यवाद", "सन्चै", "सञ्चै", "dhanyabad", "sanchai", "sanchai cha", "thikcha", "thik chha",
         "నమస్కారం", "హాయ్", "ధన్యవాదాలు", "బాగుంది",
         "നമസ്കാരം", "ഹലോ", "നന്ദി",
         "مرحبا", "أهلا", "شكرا",
@@ -417,6 +420,7 @@ class Tarz:
         defaults = {
             "en": "Okay, I can help with that.",
             "hi": "ठीक है, मैं मदद करता हूँ।",
+            "ne": "ठिक छ, म सहयोग गर्छु।",
             "te": "సరే, నేను సహాయం చేస్తాను.",
             "ml": "ശരി, ഞാൻ സഹായിക്കാം.",
             "ar": "حسنًا، سأساعدك في ذلك.",
@@ -518,8 +522,10 @@ class Tarz:
             "also", "add", "include", "more", "next", "continue", "too", "and",
             # Telugu (కూడా=also, ఇంకా=more)
             "కూడా", "ఇంకా", "అలాగే",
-            # Hindi (भी=also, మరియు=and)
-            "भी", "మరియు",
+            # Hindi (भी=also, और=and)
+            "भी", "और",
+            # Nepali
+            "पनि", "थप", "अझै", "pani", "thap", "ajhai",
             # Malayalam (കൂടി=more, കൂടെ=also)
             "കൂടി", "കൂടെ",
         }
@@ -568,6 +574,9 @@ class Tarz:
             # Telugu phonetic and native
             "ela unnavu", "ela unnaru", "meeru ela unnaru", "nuvvu ela unnavu",
             "nenu bagunnanu", "nenu bagunnanu andi", "nenu kuda bagunnanu",
+            # Nepali phonetic and native
+            "tapai sanchai hunuhunchha", "tapai sanchai chha", "ma sanchai chu", "ma thik chu",
+            "तपाईं सन्चै हुनुहुन्छ", "म सन्चै छु", "म ठिक छु",
             # Hindi phonetic and native ("me bhi" = I'm also fine)
             "me bhi", "mein bhi", "main bhi", "mai bhi", "me too", "same here",
             "me bhi thik", "mein bhi thik", "main bhi thik", "main bhi theek", "i am fine too",
