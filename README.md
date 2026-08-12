@@ -78,7 +78,7 @@ Local-first multilingual voice assistant built in Python.
 │            │     LLM Generator      │                   │
 │            │   Ollama streaming     │                   │
 │            └────────────┬───────────┘                   │
-│                         │  tokens stream out             │
+│                         │  tokens stream out            │
 │            ┌────────────▼───────────┐                   │
 │            │   Sentence Buffer      │                   │
 │            │  groups tokens into    │                   │
@@ -95,11 +95,11 @@ Local-first multilingual voice assistant built in Python.
 │                   │                                     │
 │       ┌───────────┴────────────┐                        │
 │       │                        │                        │
-│  ┌────▼──────────┐   ┌─────────▼──────────┐            │
+│  ┌────▼──────────┐   ┌─────────▼──────────┐             │
 │  │  SuperTonic   │   │     Piper ONNX      │            │
 │  │  English      │   │  Nepali / Telugu /  │            │
 │  │  Hindi        │   │  Malayalam / Arabic │            │
-│  └────┬──────────┘   └─────────┬──────────┘            │
+│  └────┬──────────┘   └─────────┬──────────┘             │
 │       └───────────┬────────────┘                        │
 │                   │                                     │
 │            ┌──────▼─────────────────┐                   │
