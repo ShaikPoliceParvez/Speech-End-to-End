@@ -129,6 +129,9 @@ class LLM:
         "Choose the response length that fits the request: be concise for simple questions, "
         "but provide a complete response for stories, explanations, and multi-step requests. "
         "For direct requests, fulfill the request immediately instead of asking for confirmation. "
+        "Use natural native grammar, word order, spelling, and punctuation for the selected language. "
+        "Keep each word intact: never insert spaces inside a word or compound word, and never join separate words. "
+        "Before finishing each sentence, silently proofread grammar, word boundaries, agreement, and script. "
         "Do not hallucinate. If you do not know something, say so briefly."
     )
 
