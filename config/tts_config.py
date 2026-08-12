@@ -22,12 +22,13 @@ class TTSSettings(BaseSettings):
     TTS_FIRST_SENTENCE_WORD_CHUNK_SIZE: int = 2    # words per chunk when wordwise mode is on
 
     # Pacing and punctuation splitting
-    TTS_CHUNK_ON_MINOR_PUNCTUATION: bool = False  # also split at commas/semicolons; off keeps sentences whole
+    TTS_CHUNK_ON_MINOR_PUNCTUATION: bool = True   # also split at commas/semicolons for natural pauses
+    TTS_SENTENCE_PAUSE_MS: int = 120              # silence between punctuation-delimited chunks
     TTS_LEAD_WORDS_IMMEDIATE: bool = True          # (unused unless lead_words path is enabled in app.py)
     TTS_LEAD_WORDS_COUNT: int = 2                  # how many lead words to emit when that mode is active
-    # Fragments below BOTH thresholds are held and merged into the next sentence to avoid choppy single-word clips
-    TTS_MIN_FORCE_CHARS: int = 15  # raise this to merge more short sentences together
-    TTS_MIN_FORCE_WORDS: int = 3   # raise this to merge more short sentences together
+    # Emit every punctuation-delimited chunk so the playback pause is audible.
+    TTS_MIN_FORCE_CHARS: int = 0
+    TTS_MIN_FORCE_WORDS: int = 0
 
     # Filler/preface — a short phrase played while the LLM is still thinking
     TTS_CONTEXT_PREFACE_ENABLED: bool = True   # play "Sure, let me check..." before the real response
@@ -100,7 +101,7 @@ TTS_PRONUNCIATION_MAP: dict = {
 LANGUAGE_PREFACES: dict = {
     "en": {
         "greeting": ["Hello. It is really nice to hear from you.", "Hi there. Glad we are speaking right now."],
-        "wellbeing_query": ["Thanks for asking.", "I am doing well, thank you."],
+        "wellbeing_query": ["I am doing well, thank you. How are you?"],
         "smalltalk": ["Glad to hear that.", "Nice!", "That sounds good."],
         "appreciation": ["Great!", "Awesome.", "Happy to hear that."],
         "generic": ["Sure, I can help with that.", "Alright, let me help you.", "Okay, let us go through it."],
@@ -124,7 +125,7 @@ LANGUAGE_PREFACES: dict = {
     },
     "hi": {
         "greeting": ["नमस्ते। आपसे फिर बात करके अच्छा लगा।", "नमस्कार। आपकी आवाज़ सुनकर अच्छा लगा।"],
-        "wellbeing_query": ["पूछने के लिए धन्यवाद।", "मैं ठीक हूँ, धन्यवाद।"],
+        "wellbeing_query": ["मैं ठीक हूँ, धन्यवाद। आप कैसे हैं?"],
         "smalltalk": ["अच्छा लगा सुनकर।", "बहुत बढ़िया।", "यह अच्छा है।"],
         "appreciation": ["बहुत अच्छा!", "शानदार।", "यह सुनकर खुशी हुई।"],
         "generic": ["ज़रूर, मैं मदद करता हूँ।", "ठीक है, मैं मदद करता हूँ।"],
@@ -148,7 +149,7 @@ LANGUAGE_PREFACES: dict = {
     },
     "te": {
         "greeting": ["నమస్కారం. మళ్లీ మాట్లాడటం చాలా ఆనందంగా ఉంది.", "నమస్కారం. మీతో మాట్లాడటం సంతోషంగా ఉంది."],
-        "wellbeing_query": ["అడిగినందుకు ధన్యవాదాలు.", "నేను బాగు ఉన్నాను, ధన్యవాదాలు."],
+        "wellbeing_query": ["నేను బాగున్నాను, ధన్యవాదాలు. మీరు ఎలా ఉన్నారు?"],
         "smalltalk": ["వినడానికి సంతోషంగా ఉంది.", "చాలా సంతోషంగా ఉంది.", "అది మంచి విషయం."],
         "appreciation": ["అద్భుతం!", "సూపర్.", "అది విని సంతోషంగా ఉంది."],
         "generic": [
@@ -180,7 +181,7 @@ LANGUAGE_PREFACES: dict = {
     },
     "ne": {
         "greeting": ["नमस्ते। फेरि तपाईंसँग कुरा गर्न पाउँदा खुशी लाग्यो।", "नमस्कार। अहिले तपाईंसँग जोडिन पाउँदा राम्रो लाग्यो।"],
-        "wellbeing_query": ["सोध्नुभएकोमा धन्यवाद।", "म ठीक छु, धन्यवाद।"],
+        "wellbeing_query": ["म ठीक छु, धन्यवाद। तपाईंलाई कस्तो छ?"],
         "smalltalk": ["त्यो सुनेर खुशी लाग्यो।", "धेरै राम्रो कुरा हो।", "राम्रो छ, यसैगरी अघि बढौँ।"],
         "appreciation": ["एकदम राम्रो!", "धमाकेदार छ।", "यो सुन्दा साँच्चै खुशी लाग्यो।"],
         "generic": ["पक्का, म यसमा तपाईँलाई राम्रोसँग सहयोग गर्छु।", "ठिक छ, अब यसलाई सजिलैसँग बुझेर अघि बढौँ।"],
@@ -204,7 +205,7 @@ LANGUAGE_PREFACES: dict = {
     },
     "ml": {
         "greeting": ["നമസ്കാരം. വീണ്ടും നിങ്ങളോടു സംസാരിക്കുന്നത് സന്തോഷമാണ്.", "ഹലോ. നിങ്ങളുമായി സംസാരിക്കാൻ കഴിഞ്ഞത് സന്തോഷം."],
-        "wellbeing_query": ["ചോദിച്ചതിന് നന്ദി.", "എനിക്ക് സുഖമാണ്, നന്ദി."],
+        "wellbeing_query": ["എനിക്ക് സുഖമാണ്, നന്ദി. നിങ്ങൾക്ക് എങ്ങനെയുണ്ട്?"],
         "smalltalk": ["അത് കേട്ട് സന്തോഷം.", "നല്ലതാണ്.", "അത് നല്ല കാര്യമാണ്."],
         "appreciation": ["വളരെ നല്ലത്!", "അദ്ഭുതം.", "അത് കേട്ട് സന്തോഷം."],
         "generic": ["ശരി, ഞാൻ സഹായിക്കാം.", "അങ്ങനെ ചെയ്യാം, നമുക്ക് നോക്കാം."],
@@ -228,7 +229,7 @@ LANGUAGE_PREFACES: dict = {
     },
     "ar": {
         "greeting": ["مرحبًا. يسعدني جدًا التحدث معك من جديد.", "أهلًا. من الجميل سماعك والتواصل معك الآن."],
-        "wellbeing_query": ["شكرًا لسؤالك.", "أنا بخير، شكرًا لك."],
+        "wellbeing_query": ["أنا بخير، شكرًا لك. كيف حالك؟"],
         "smalltalk": ["سعيد بسماع ذلك.", "هذا جميل.", "رائع."],
         "appreciation": ["ممتاز!", "رائع جدًا.", "سعيد بذلك."],
         "generic": ["حسنًا، سأساعدك في ذلك.", "تمام، دعنا نراجع هذا معًا."],

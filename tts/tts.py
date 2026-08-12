@@ -8,6 +8,8 @@ import numpy as np
 import sounddevice as sd
 from numbers import Number
 
+from config import TTS_SENTENCE_PAUSE_MS
+
 try:
     from scipy.signal import resample_poly as _scipy_resample_poly
 except ImportError:
@@ -213,6 +215,7 @@ class Speaker:
         self._stream_actual_rate = None  # hardware rate the stream runs at
         self._interrupted = threading.Event()
         self._speaking = threading.Event()
+        self._last_played_sentence = None
         self.num2words_lang_map = {
             "en": "en",
             "hi": "hi",
@@ -251,6 +254,7 @@ class Speaker:
         self.started = False
         self._interrupted.clear()
         self._speaking.clear()
+        self._last_played_sentence = None
         with self._metrics_lock:
             self._turn_metrics = {
                 "turn_start": time.perf_counter(),
@@ -568,6 +572,19 @@ class Speaker:
             try:
                 if self._interrupted.is_set():
                     continue
+
+                previous_sentence = self._last_played_sentence or ""
+                pause_endings = (".", "!", "?", "।", ",", ";", ":")
+                if previous_sentence.rstrip().endswith(pause_endings):
+                    pause_deadline = time.perf_counter() + max(
+                        0.0, float(TTS_SENTENCE_PAUSE_MS) / 1000
+                    )
+                    while not self._interrupted.is_set():
+                        remaining = pause_deadline - time.perf_counter()
+                        if remaining <= 0:
+                            break
+                        time.sleep(min(0.01, remaining))
+
                 playback_start = time.perf_counter()
                 with self._metrics_lock:
                     if self._turn_metrics.get("playback_start") is None:
@@ -617,6 +634,7 @@ class Speaker:
 
                 if self.on_event is not None:
                     self.on_event("TTS_COMPLETED", {"sentence": sentence, "language": language})
+                self._last_played_sentence = sentence
 
             except Exception as e:
                 if self.on_event is not None:

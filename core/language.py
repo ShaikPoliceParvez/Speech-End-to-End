@@ -66,14 +66,14 @@ _ROMAN_LANGUAGE_VOCABULARY = {
     "apna", "apni", "apne",
 
     # Question words
-    "kya", "kya?", "ky", "kaise", "kese", "kaisa",
+    "kya", "kya?", "ky", "kaise", "kese", "kes", "kaisa",
     "kab", "kahan", "kidhar", "kaun", "kon",
     "kis", "kisko", "jisko", "isko", "usko",
     "kitna", "kitni", "kitne", "kyun", "kyu",
 
     # Common verbs
     "hai", "h", "he", "hain",
-    "ho", "hu", "hun", "hoo",
+    "ho", "hu", "hun", "hoo", "eho",
     "tha", "thi", "the",
     "kar", "karo", "karna", "karni",
     "karta", "karti", "karte",

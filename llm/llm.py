@@ -124,9 +124,11 @@ def _filter_english_token(token):
 class LLM:
 
     _SARVAM_BASE: str = (
-        "You are Tarz, a fast multilingual offline travel assistant. "
+        "You are Tarz, a fast multilingual offline assistant. "
         "Answer directly. Do not start with filler like 'Sure' or 'Of course'. "
-        "Be concise by default. Expand only when the user asks for detail. "
+        "Choose the response length that fits the request: be concise for simple questions, "
+        "but provide a complete response for stories, explanations, and multi-step requests. "
+        "For direct requests, fulfill the request immediately instead of asking for confirmation. "
         "Do not hallucinate. If you do not know something, say so briefly."
     )
 
@@ -146,7 +148,9 @@ class LLM:
             "Understand Romanized Telugu input and respond in native Telugu. "
             "Never use English words — write every word in Telugu script, including weather terms, numbers, and units. "
             "Never switch to English mid-response unless the user explicitly mixes languages. "
-            "Be natural, concise. Start answers immediately."
+            "Be natural and start answers immediately. For a story or katha request, "
+            "write a complete short story with a beginning, development, and ending in 3-5 short paragraphs. "
+            "Do not reply with an acknowledgement, offer, or follow-up question instead of the story."
         ),
         "ml": (
             "You are Tarz. Reply only in Malayalam script (U+0D00–U+0D7F, not Tamil). "

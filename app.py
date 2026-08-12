@@ -67,6 +67,7 @@
 
 import config
 import msvcrt
+import time
 import threading
 import queue
 import random
@@ -322,6 +323,7 @@ class Tarz:
                 "wow", "great", "awesome", "nice", "super", "cool", "excellent",
                 "बहुत बढ़िया", "शानदार", "वाह",
                 "చాలా బాగుంది", "బాగుంది", "సూపర్", "అద్భుతం",
+                "chala manchi katha", "chaala manchi katha", "అది చాలా మంచి కథ",
                 "വളരെ നല്ലത്", "അടിപൊളി", "സൂപർ",
                 "رائع", "ممتاز", "مذهل",
             },
@@ -370,6 +372,7 @@ class Tarz:
                 "wow", "great", "awesome", "nice", "super", "cool", "excellent",
                 "बहुत बढ़िया", "शानदार", "वाह",
                 "చాలా బాగుంది", "బాగుంది", "సూపర్", "అద్భుతం",
+                "chala manchi katha", "chaala manchi katha", "అది చాలా మంచి కథ",
                 "വളരെ നല്ലത്", "അടിപൊളി",
                 "رائع", "ممتاز", "مذهل",
             }):
@@ -496,6 +499,11 @@ class Tarz:
             for phrase in {
                 "manchi katha",
                 "adi manchi katha",
+                "chala manchi katha",
+                "chaala manchi katha",
+                "adi chala manchi katha",
+                "adi chaala manchi katha",
+                "అది చాలా మంచి కథ",
                 "nice story",
                 "good story",
                 "achi kahani",
@@ -607,6 +615,9 @@ class Tarz:
         social_phrases = {
             # English wellbeing exchanges
             "how are you", "what about you", "i am good", "i'm good", "im good",
+            # Hindi wellbeing questions, including the normalized Devanagari form.
+            "aap kaise ho", "aap kese ho", "aap kaise hain", "aap kese hain",
+            "आप कैसे हो", "आप कैसे हैं", "कैसे हो", "कैसे हैं",
             # Telugu phonetic and native
             "ela unnavu", "ela unnaru", "meeru ela unnaru", "nuvvu ela unnavu",
             "nenu bagunnanu", "nenu bagunnanu andi", "nenu kuda bagunnanu",
@@ -621,6 +632,7 @@ class Tarz:
             "bahut badiya", "bahut badhiya", "bahut badia", "बहुत बढ़िया", "बहुत बढिया",
             # Telugu appreciation
             "chaala bagundi", "chala bagundi", "చాలా బాగుంది",
+            "chala manchi katha", "chaala manchi katha", "అది చాలా మంచి కథ",
             # Malayalam appreciation
             "valare nannayi", "വളരെ നല്ലത്",
             # Arabic appreciation
@@ -1109,7 +1121,10 @@ class Tarz:
 
         # ── 5. Build filler phrase and effective LLM prompt ──────────
         context_preface = None
-        if config.TTS_CONTEXT_PREFACE_ENABLED:
+        # Creative requests should begin with the requested content immediately;
+        # a canned bridge sounds like a duplicate answer before the LLM starts.
+        preface_excluded_tasks = {"story", "joke", "poem"}
+        if config.TTS_CONTEXT_PREFACE_ENABLED and self.current_task not in preface_excluded_tasks:
             context_preface = self._build_context_preface(normalized_text, language, self.current_task)
         effective_prompt = self._build_effective_prompt(
             normalized_text,
