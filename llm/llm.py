@@ -1195,6 +1195,20 @@ def sentence_stream(
                         yield out
                     continue
 
+            # Mid-sentence flush: once the first chunk has been emitted, keep draining
+            # the buffer at normal chunk size so long punctuation-free sentences don't
+            # cause silence while TTS waits for the next period.
+            if has_emitted and len(cleaned) >= min_chars and words >= min_words:
+                sentence = cleaned
+                buffer = ""
+                out = push_piece(sentence)
+                if out:
+                    if on_event is not None:
+                        on_event("SENTENCE_READY", {"sentence": out})
+                        on_event("LLM_SENTENCE_READY", {"sentence": out})
+                    yield out
+                continue
+
             # Safety flush for long run-on output without punctuation.
             if len(cleaned) >= max_chars or words >= max_words:
                 sentence = cleaned

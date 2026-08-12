@@ -1197,9 +1197,10 @@ class Tarz:
         first_chunk_min_chars = config.TTS_FIRST_CHUNK_MIN_CHARS
         first_chunk_min_words = config.TTS_FIRST_CHUNK_MIN_WORDS
         if context_preface:
-            # Emit the first stable phrase quickly after filler display.
-            first_chunk_min_chars = max(6, min(first_chunk_min_chars, 14))
-            first_chunk_min_words = max(1, min(first_chunk_min_words, 2))
+            # Require enough words so the first chunk covers synthesis time of the next chunk.
+            # Old values (chars=14, words=2) caused a 2-word "Delhi is" fragment then a long gap.
+            first_chunk_min_chars = max(30, min(first_chunk_min_chars, 60))
+            first_chunk_min_words = max(6, min(first_chunk_min_words, 10))
         # Always start TTS on the first sentence; first_chunk_min thresholds guard against tiny fragments.
         first_sentence_immediately = True
         first_word_immediately = False
