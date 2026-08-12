@@ -5,41 +5,44 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class STTSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    STT_MODEL: str = "whisper"  # whisper | parakeet
-    WHISPER_SIZE: str = "small"  # tiny | base | small | medium | large
-    WHISPER_DEVICE: str = "cpu"
-    WHISPER_COMPUTE: str = "int8"
-    WHISPER_BEAM_SIZE: int = 1
-    WHISPER_TEMPERATURES: Tuple[float, ...] = (0.0, 0.2)
-    WHISPER_COMPRESSION_RATIO_THRESHOLD: float = 2.4
-    WHISPER_LOG_PROB_THRESHOLD: float = -1.0
-    WHISPER_NO_SPEECH_THRESHOLD: float = 0.6
-    WHISPER_LANGUAGE_CONFIDENCE_HIGH: float = 0.80
+    # Speech engine
+    STT_MODEL: str = "whisper"   # which engine to use: "whisper" or "parakeet"
+    WHISPER_SIZE: str = "small"  # model size: tiny/base/small/medium/large — larger = more accurate but slower
+    WHISPER_DEVICE: str = "cpu"  # "cpu" or "cuda"; switch to "cuda" if you have a GPU
+    WHISPER_COMPUTE: str = "int8"   # quantization: int8 is fast on CPU; use float16 on GPU
+    WHISPER_BEAM_SIZE: int = 1      # 1 = greedy/fastest; higher improves accuracy slightly
 
-    # Script-biasing prompts per language
+    # Quality filters — output that fails these is re-decoded or discarded
+    WHISPER_TEMPERATURES: Tuple[float, ...] = (0.0, 0.2)        # fallback temperatures tried when first decode has low confidence
+    WHISPER_COMPRESSION_RATIO_THRESHOLD: float = 2.4            # rejects hallucinated text that compresses suspiciously well
+    WHISPER_LOG_PROB_THRESHOLD: float = -1.0                    # rejects output where average word probability is too low
+    WHISPER_NO_SPEECH_THRESHOLD: float = 0.6                    # above this silence-score the audio is ignored as non-speech
+    WHISPER_LANGUAGE_CONFIDENCE_HIGH: float = 0.80              # auto-detected language is trusted above this probability
+
+    # Script-biasing prompts — shown to the decoder before it starts to steer it to the right script
     WHISPER_HINDI_PROMPT: str = "हिंदी, देवनागरी"
     WHISPER_NEPALI_PROMPT: str = "नेपाली, देवनागरी"
     WHISPER_TELUGU_PROMPT: str = "తెలుగు, తెలుగు లిపి"
     WHISPER_MALAYALAM_PROMPT: str = "മലയാളം, മലയാളം ലിപി"
     WHISPER_ARABIC_PROMPT: str = "العربية، اللغة العربية"
 
-    # Hard-constraint prefix tokens to commit the decoder to the correct script
+    # Hard prefix tokens — lock the decoder to start in the correct script from token 1
     WHISPER_HINDI_PREFIX: str = "मैं"
     WHISPER_NEPALI_PREFIX: str = "म"
     WHISPER_TELUGU_PREFIX: str = "నేను"
     WHISPER_MALAYALAM_PREFIX: str = "ഞാൻ"
     WHISPER_ARABIC_PREFIX: str = "أنا"
 
-    STT_ALLOWED_LANGUAGES: Tuple[str, ...] = ("en", "hi", "ne", "te", "ml", "ar")
-    STT_PREFER_PREVIOUS_LANGUAGE_HINT: bool = True
-    STT_RETRY_ON_LOW_CONFIDENCE: bool = False
-    STT_INDIC_ASR_ENABLED: bool = True
+    STT_ALLOWED_LANGUAGES: Tuple[str, ...] = ("en", "hi", "ne", "te", "ml", "ar")  # only these languages are recognised
+    STT_PREFER_PREVIOUS_LANGUAGE_HINT: bool = True   # reuse last detected language when audio is short or ambiguous
+    STT_RETRY_ON_LOW_CONFIDENCE: bool = False         # decode a second time on low confidence (slower; rarely helps)
+    STT_INDIC_ASR_ENABLED: bool = True                # use IndicConformer alongside Whisper for Indic languages
 
-    # Pseudo-streaming windows
-    STT_MIN_PARTIAL_SECONDS: float = 2.0
-    STT_PARTIAL_INTERVAL: float = 0.75
-    STT_ROLLING_SECONDS: float = 3.5
-    STT_OVERLAP_SECONDS: float = 0.8
+    # Pseudo-streaming windows — controls how live partial transcripts are generated
+    STT_MIN_PARTIAL_SECONDS: float = 2.0   # don't show a partial until at least this much audio has arrived
+    STT_PARTIAL_INTERVAL: float = 0.75     # re-decode every 0.75 s during live speech
+    STT_ROLLING_SECONDS: float = 3.5       # sliding window size used for partial decodes
+    STT_OVERLAP_SECONDS: float = 0.8       # overlap between windows so words at boundaries aren't missed
 
 
 stt_settings = STTSettings()

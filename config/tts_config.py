@@ -4,42 +4,40 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class TTSSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    VOICE: str = "F2"  # M1 | M2 | F1 | F2 | F3 | F4 | F5 | F6
-    TTS_SPEED: float = 0.92
+    VOICE: str = "F2"       # SuperTonic speaker voice; F = female, M = male — try F1–F6 / M1–M2
+    TTS_SPEED: float = 0.92  # playback speed: < 1 = slower/clearer, > 1 = faster
 
-    # Sentence chunking bounds
-    TTS_MIN_CHARS: int = 72
-    TTS_MIN_WORDS: int = 12
-    TTS_MAX_CHARS: int = 220
-    TTS_MAX_WORDS: int = 36
+    # Sentence chunking — controls how tokens are grouped into speakable chunks
+    TTS_MIN_CHARS: int = 40   # chunk must have at least this many chars before it speaks (avoids tiny blips)
+    TTS_MIN_WORDS: int = 7    # OR at least this many words; either condition is enough to emit
+    TTS_MAX_CHARS: int = 220  # hard upper limit; chunk is flushed immediately when exceeded
+    TTS_MAX_WORDS: int = 36   # same hard limit by word count
 
-    # Low-latency first-chunk controls
-    TTS_FIRST_SENTENCE_IMMEDIATELY: bool = True
-    TTS_FIRST_CHUNK_MIN_CHARS: int = 9999  # disable non-punctuation early-emit; start TTS at first sentence boundary
-    TTS_FIRST_CHUNK_MIN_WORDS: int = 1
-    TTS_FIRST_WORD_IMMEDIATELY: bool = True
-    TTS_FIRST_SENTENCE_WORDWISE: bool = False
-    TTS_FIRST_SENTENCE_WORD_CHUNK_SIZE: int = 2
+    # First-chunk latency — how quickly TTS starts after the LLM begins responding
+    TTS_FIRST_SENTENCE_IMMEDIATELY: bool = True   # speak the first sentence as soon as it ends
+    TTS_FIRST_CHUNK_MIN_CHARS: int = 9999  # 9999 = disabled; don't emit mid-sentence before punctuation
+    TTS_FIRST_CHUNK_MIN_WORDS: int = 9999  # 9999 = disabled; same — wait for a real sentence boundary
+    TTS_FIRST_WORD_IMMEDIATELY: bool = True        # (unused in current flow) emit the very first word alone
+    TTS_FIRST_SENTENCE_WORDWISE: bool = False      # word-by-word mode for the first sentence; off by default
+    TTS_FIRST_SENTENCE_WORD_CHUNK_SIZE: int = 2    # words per chunk when wordwise mode is on
 
-    # Pacing / punctuation
-    TTS_CHUNK_ON_MINOR_PUNCTUATION: bool = False
-    TTS_LEAD_WORDS_IMMEDIATE: bool = True
-    TTS_LEAD_WORDS_COUNT: int = 2
-    # Short clauses below both thresholds are held and merged with the next sentence.
-    # Raise these to reduce audible gaps between short adjacent sentences.
-    TTS_MIN_FORCE_CHARS: int = 50
-    TTS_MIN_FORCE_WORDS: int = 8
+    # Pacing and punctuation splitting
+    TTS_CHUNK_ON_MINOR_PUNCTUATION: bool = False  # also split at commas/semicolons; off keeps sentences whole
+    TTS_LEAD_WORDS_IMMEDIATE: bool = True          # (unused unless lead_words path is enabled in app.py)
+    TTS_LEAD_WORDS_COUNT: int = 2                  # how many lead words to emit when that mode is active
+    # Fragments below BOTH thresholds are held and merged into the next sentence to avoid choppy single-word clips
+    TTS_MIN_FORCE_CHARS: int = 15  # raise this to merge more short sentences together
+    TTS_MIN_FORCE_WORDS: int = 3   # raise this to merge more short sentences together
 
-    # Contextual filler/preface before model stream
-    TTS_CONTEXT_PREFACE_ENABLED: bool = True
-    TTS_CONTEXT_PREFACE_RANDOM: bool = True
-    # "normal" | "slow"
-    TTS_PREFACE_PACING: str = "slow"
-    TTS_PREFACE_MIN_WORDS: int = 6
+    # Filler/preface — a short phrase played while the LLM is still thinking
+    TTS_CONTEXT_PREFACE_ENABLED: bool = True   # play "Sure, let me check..." before the real response
+    TTS_CONTEXT_PREFACE_RANDOM: bool = True    # pick filler randomly; False = always use the first one
+    TTS_PREFACE_PACING: str = "slow"           # "slow" adds a slight pause; "normal" is standard pace
+    TTS_PREFACE_MIN_WORDS: int = 6             # fillers shorter than this are skipped as too abrupt
 
-    # Look-ahead prefetch slots
-    TTS_PREFETCH_TEXT: int = 2
-    TTS_PREFETCH_AUDIO: int = 1
+    # Prefetch slots — how many sentences/chunks to prepare ahead of playback
+    TTS_PREFETCH_TEXT: int = 2   # sentences queued for synthesis ahead of playback
+    TTS_PREFETCH_AUDIO: int = 1  # audio chunks queued for playback ahead of speaker output
 
 
 tts_settings = TTSSettings()

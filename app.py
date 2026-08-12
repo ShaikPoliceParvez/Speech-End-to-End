@@ -974,6 +974,7 @@ class Tarz:
         print(f"[DEBUG APP] Input text: '{text}' | STT hint: {stt_language_hint} | Confidence: {stt_language_confidence}")
 
         # ── 1. Language detection & script classification ─────────────
+        language_start = self.tracing.now()
         with self.tracing.start_step(
             "Language",
             input={
@@ -1001,7 +1002,10 @@ class Tarz:
                     "script": script,
                     "normalized_message": normalized_text,
                 },
+                metadata={"latency_ms": self.tracing.elapsed_ms(language_start)},
             )
+
+        language_latency_ms = self.tracing.elapsed_ms(language_start)
 
         if normalized_text != text:
             print(f"Normalized: {normalized_text}")
@@ -1052,6 +1056,7 @@ class Tarz:
             print(f"{'─'*55}")
 
         # ── 3. Conversation memory ───────────────────────────────────
+        memory_start = self.tracing.now()
         with self.tracing.start_step(
             "Memory",
             metadata={"type": "conversation-history", "rag_enabled": False},
@@ -1060,12 +1065,16 @@ class Tarz:
             self.tracing.update_step(
                 memory,
                 output={"message_count": len(history), "retrieved_chunks": 0},
+                metadata={"latency_ms": self.tracing.elapsed_ms(memory_start)},
             )
+
+        memory_latency_ms = self.tracing.elapsed_ms(memory_start)
 
         # ── 4. Optional camera capture for vision intents ────────────
         image = None
         vision_requested = intent in ("VISION", "OCR")
         if vision_requested and self.llm.supports_vision():
+            camera_start = self.tracing.now()
             with self.tracing.start_step(
                 "Camera",
                 metadata={"image_included_in_trace": False},
@@ -1076,6 +1085,7 @@ class Tarz:
                 self.tracing.update_step(
                     capture,
                     output={"captured": True, "image_size": image_size},
+                    metadata={"latency_ms": self.tracing.elapsed_ms(camera_start)},
                 )
         elif vision_requested:
             print("Camera analysis is unavailable with the configured text-only model.")
@@ -1205,6 +1215,8 @@ class Tarz:
         producer_thread.start()
 
         # ── 6. LLM → sentence buffer → TTS pipeline ──────────────────
+        # Capture how long the pre-TTS pipeline took so time_to_first_audio can be computed.
+        pipeline_before_tts_ms = self.tracing.elapsed_ms(request_start)
         self.tts.start_turn()
         self.tts.set_language(language)
         barge_in_stop = threading.Event()
@@ -1349,22 +1361,45 @@ class Tarz:
         if turn is not None:
             turn.update(output={"response": " ".join(full_response)})
             total_latency_ms = self.tracing.elapsed_ms(request_start)
+            first_audio_latency_ms = tts_metrics.get("first_audio_latency_ms") or 0
+            time_to_first_audio_ms = round(pipeline_before_tts_ms + first_audio_latency_ms, 2)
+            llm_metrics = self.llm.last_metrics or {}
             timing = {
-                "total_interaction_latency_ms": total_latency_ms,
+                # ── End-to-end ─────────────────────────────────────────────
+                "total_task_ms": total_latency_ms,           # wall-clock from request received to playback complete
+                "time_to_first_audio_ms": time_to_first_audio_ms,  # from request to first spoken word
+                "pipeline_before_tts_ms": pipeline_before_tts_ms,  # language+router+memory+llm start overhead
+                # ── Per-stage latencies ────────────────────────────────────
+                "language_latency_ms": language_latency_ms,
                 "router_latency_ms": self.tracing.elapsed_ms(router_start),
-                "llm": self.llm.last_metrics,
+                "memory_latency_ms": memory_latency_ms,
+                "llm": {
+                    "first_token_ms": llm_metrics.get("first_token_ms"),         # time to first LLM token
+                    "total_latency_ms": llm_metrics.get("total_latency_ms"),     # full generation time
+                    "tokens_per_second": llm_metrics.get("tokens_per_second"),
+                    "input_tokens": llm_metrics.get("input_tokens"),
+                    "output_tokens": llm_metrics.get("output_tokens"),
+                    "model": llm_metrics.get("model"),
+                },
                 "tts": {
+                    "first_audio_latency_ms": first_audio_latency_ms,  # sentence buffer + synthesis
                     "synthesis_duration_ms": tts_metrics["synthesis_duration_ms"],
                     "playback_duration_ms": tts_metrics["playback_duration_ms"],
+                    "queue_delay_ms": tts_metrics.get("queue_delay_ms"),
+                    "audio_duration_ms": round(tts_metrics.get("audio_duration_ms") or 0, 2),
+                    "chunk_count": tts_metrics.get("chunk_count"),
                 },
             }
             timing.update(pipeline_metrics or {})
+            # ── Percentage breakdown (what % of total each stage consumed) ─
             for name, duration in {
+                "language_percent": language_latency_ms,
                 "router_percent": timing["router_latency_ms"],
-                "llm_percent": self.llm.last_metrics.get("total_latency_ms", 0),
+                "memory_percent": memory_latency_ms,
+                "llm_percent": llm_metrics.get("total_latency_ms") or 0,
                 "tts_percent": tts_metrics["synthesis_duration_ms"] or 0,
                 "playback_percent": tts_metrics["playback_duration_ms"] or 0,
-                "stt_percent": timing.get("stt_latency_ms", 0),
+                "stt_percent": (pipeline_metrics or {}).get("stt_latency_ms") or 0,
             }.items():
                 timing[name] = round(duration / max(total_latency_ms, 0.001) * 100, 2)
             self.tracing.update_turn_metrics(turn, timing)

@@ -104,11 +104,43 @@ class LangfuseTracer:
         if turn is None:
             return
 
-        turn.update(metadata={
-            "timing": metrics,
-            "cpu_percent_end": self._cpu_percent(),
-            "ram_percent_end": self._ram_percent(),
-        })
+        # Surface the most actionable latencies directly in output so they appear
+        # at the top level in Langfuse without drilling into metadata.
+        output_summary = {}
+        for key in (
+            "total_task_ms",
+            "time_to_first_audio_ms",
+            "pipeline_before_tts_ms",
+            "language_latency_ms",
+            "router_latency_ms",
+            "memory_latency_ms",
+            "stt_latency_ms",
+        ):
+            if key in metrics:
+                output_summary[key] = metrics[key]
+
+        llm = metrics.get("llm") or {}
+        if llm.get("first_token_ms") is not None:
+            output_summary["llm_first_token_ms"] = llm["first_token_ms"]
+        if llm.get("total_latency_ms") is not None:
+            output_summary["llm_total_ms"] = llm["total_latency_ms"]
+        if llm.get("tokens_per_second") is not None:
+            output_summary["llm_tokens_per_second"] = llm["tokens_per_second"]
+
+        tts = metrics.get("tts") or {}
+        if tts.get("first_audio_latency_ms") is not None:
+            output_summary["tts_first_audio_ms"] = tts["first_audio_latency_ms"]
+        if tts.get("playback_duration_ms") is not None:
+            output_summary["playback_ms"] = tts["playback_duration_ms"]
+
+        turn.update(
+            output=output_summary,
+            metadata={
+                "timing": metrics,
+                "cpu_percent_end": self._cpu_percent(),
+                "ram_percent_end": self._ram_percent(),
+            },
+        )
 
     def update_turn(self, turn, text, language, intent):
         if turn is None:

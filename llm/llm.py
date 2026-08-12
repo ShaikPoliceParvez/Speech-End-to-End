@@ -1054,7 +1054,8 @@ def sentence_stream(
         if force_emit:
             # Hold short clauses so they join the next sentence and play
             # as one unbroken breath (e.g. "मैं ठीक हूँ। आपका दिन कैसा है?").
-            if len(pending) < min_force_chars and len(pending.split()) < min_force_words:
+            # Never hold the very first emission — start TTS as soon as any sentence ends.
+            if has_emitted and len(pending) < min_force_chars and len(pending.split()) < min_force_words:
                 return None
             out = pending
             pending = ""

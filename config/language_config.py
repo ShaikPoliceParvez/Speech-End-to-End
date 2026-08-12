@@ -5,8 +5,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class LanguageSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    DEFAULT_LANGUAGE: str = "en"
-    USER_PREFERRED_LANGUAGE: Optional[str] = None
+    DEFAULT_LANGUAGE: str = "en"              # fallback language when detection fails
+    USER_PREFERRED_LANGUAGE: Optional[str] = None  # force a language e.g. "hi"; None = auto-detect
 
 
 language_settings = LanguageSettings()
@@ -24,21 +24,21 @@ SUPPORTED_LANGUAGES: dict = {
 }
 
 # ── Script-agnostic vocabulary banks ────────────────────────────────────────
-# Used by language.py majority-language detector; not env-configurable.
+# Words shared across languages — excluded so they don't skew language detection.
 
-TECHNICAL_BORROWED_WORDS: frozenset = frozenset({
+TECHNICAL_BORROWED_WORDS: frozenset = frozenset({  # tech words that appear in every language
     "wifi", "wi-fi", "laptop", "internet", "browser", "file", "email",
     "meeting", "story", "login", "password", "weather", "chatgpt", "python",
     "router", "app", "camera", "photo", "image", "video", "joke",
     "slow", "fast", "net",
 })
 
-ENGLISH_CORE_WORDS: frozenset = frozenset({
+ENGLISH_CORE_WORDS: frozenset = frozenset({  # common English words that confirm English detection
     "hello", "hi", "thanks", "thank", "you", "wow", "nice", "good", "awesome",
     "fantastic", "tell", "me", "another", "story", "morning", "please",
 })
 
-AMBIGUOUS_LANGUAGE_TOKENS: frozenset = frozenset({
+AMBIGUOUS_LANGUAGE_TOKENS: frozenset = frozenset({  # words/tokens that could belong to any language — ignored during detection
     "ok", "okay", "hmm", "hm", "mm", "yes", "yeah", "yep", "no", "nope",
     # Place names that appear in multiple language vocabularies — not language signals.
     "dubai", "riyadh", "india", "mumbai", "delhi", "hyderabad", "bangalore",
