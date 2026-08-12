@@ -123,7 +123,7 @@ def _filter_english_token(token):
 
 class LLM:
 
-    _SARVAM_BASE: str = (
+    _INDIC_BASE: str = (
         "You are Tarz, a fast multilingual offline assistant. "
         "Answer directly. Do not start with filler like 'Sure' or 'Of course'. "
         "Choose the response length that fits the request: be concise for simple questions, "
@@ -135,8 +135,8 @@ class LLM:
         "Do not hallucinate. If you do not know something, say so briefly."
     )
 
-    # Compact per-language system prompts for sarvam-1.
-    _SARVAM_SYSTEM: dict = {
+    # Compact per-language system prompts for the configured Indic model.
+    _INDIC_SYSTEM: dict = {
         "hi": (
             "The user's language is Hindi.\n"
             "The user typed using the Latin script.\n"
@@ -187,7 +187,7 @@ class LLM:
         # English always uses the lighter model.
         if (language or "").lower() == "en":
             return LLM_ENGLISH_MODEL or LLM_MODEL
-        # Indic languages use Sarvam for lower latency while preserving coverage.
+        # Indic languages use the configured Indic model for lower latency.
         if (language or "").lower() in _INDIC_LANGUAGES:
             return LLM_INDIC_MODEL or LLM_MULTILINGUAL_MODEL or LLM_MODEL
         return LLM_MULTILINGUAL_MODEL or LLM_MODEL
@@ -205,7 +205,7 @@ class LLM:
             if not model_name:
                 continue
             # Non-indic models get a short keep_alive so they unload quickly,
-            # freeing CPU/RAM bandwidth for sarvam-1 which is the primary model.
+            # freeing CPU/RAM bandwidth for the primary Indic model.
             ka = LLM_KEEP_ALIVE if model_name == LLM_INDIC_MODEL else "30s"
             try:
                 ollama.chat(
@@ -437,16 +437,16 @@ class LLM:
 
         language_name = SUPPORTED_LANGUAGES.get(lang, "English")
 
-        # sarvam-1 uses a compact prompt; base identity prepended to language rule.
-        if selected_model == LLM_INDIC_MODEL and lang in self._SARVAM_SYSTEM:
-            lang_rule = self._SARVAM_SYSTEM[lang]
+        # The configured Indic model uses a compact prompt plus its language rule.
+        if selected_model == LLM_INDIC_MODEL and lang in self._INDIC_SYSTEM:
+            lang_rule = self._INDIC_SYSTEM[lang]
             if social_turn:
                 system_instruction = (
-                    self._SARVAM_BASE + " " + lang_rule
+                    self._INDIC_BASE + " " + lang_rule
                     + " Reply in one short natural sentence. Do not repeat greetings."
                 )
             else:
-                system_instruction = self._SARVAM_BASE + " " + lang_rule
+                system_instruction = self._INDIC_BASE + " " + lang_rule
         elif lang == "hi":
             if allow_roman_output:
                 system_instruction = (
@@ -549,8 +549,8 @@ class LLM:
 
         # The TTS bridge/preface is a latency-hiding spoken transition.
         # The model must ignore it semantically.
-        # Sarvam-1 already has a compact instruction built above; skip the verbose blocks.
-        if not (selected_model == LLM_INDIC_MODEL and lang in self._SARVAM_SYSTEM):
+        # The configured Indic model already has a compact instruction; skip verbose duplicates.
+        if not (selected_model == LLM_INDIC_MODEL and lang in self._INDIC_SYSTEM):
             system_instruction += (
                 "A short conversational bridge may already be spoken before your generated response is heard. "
                 "That bridge exists only to hide latency and is not the actual answer. "
