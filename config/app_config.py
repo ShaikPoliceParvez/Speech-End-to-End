@@ -20,5 +20,9 @@ class AppSettings(BaseSettings):
         "Do you want me to read the document or describe the scene?"
     )  # shown when the assistant can't tell if you want vision or OCR
 
+    # Startup greeting spoken after all models are loaded
+    INTRO_ENABLED: bool = True   # set False to skip the spoken greeting at startup
+    INTRO_LANGUAGE: str = "en"   # language for the greeting: "en" | "hi" | "ne" | "te" | "ml" | "ar"
+
 
 app_settings = AppSettings()

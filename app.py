@@ -186,6 +186,23 @@ class Tarz:
         if config.DEBUG:
             print(f"[EVENT] {name}: {data}")
 
+    def speak_intro(self):
+        """Speak a welcome greeting in the configured intro language."""
+        if not config.INTRO_ENABLED:
+            return
+        greetings = {
+            "en": "Hi, this is Tarz, your personal assistant. How can I help you today?",
+            "hi": "नमस्ते, मैं Tarz हूँ, आपका पर्सनल असिस्टेंट। आज आपकी कैसे मدد करूँ?",
+            "ne": "नमस्ते, म तपाईंको पर्सनल असिस्टेन्ट Tarz हुँ। आज म तपाईंलाई कसरी सहयोग गर्न सक्छु?",
+            "te": "నమస్కారం, నేను Tarz, మీ పర్సనల్ అసిస్టెంట్। నేను మీకు ఎలా సహాయం చేయగలను?",
+            "ml": "നമസ്കാരം, ഞാൻ Tarz, നിങ്ങളുടെ പേഴ്സണൽ അസിസ്റ്റന്റ്। ഇന്ന് നിങ്ങള്ക്ക് എന്ത് സഹായം വേണം?",
+            "ar": "مرحبا، أنا Tarz، مساعدك الشخصي। كيف يمكنني مساعدتك اليوم؟",
+        }
+        lang = config.INTRO_LANGUAGE
+        text = greetings.get(lang, greetings["en"])
+        print(f"\nTarz: {text}")
+        self.tts.speak(text, lang)
+
     @staticmethod
     def _return_to_menu_requested(text):
         """
@@ -1543,6 +1560,7 @@ class Tarz:
 if __name__ == "__main__":
 
     tarz = Tarz()
+    tarz.speak_intro()
 
     while True:
         mode = input(
