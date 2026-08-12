@@ -322,12 +322,25 @@ _ROMAN_LANGUAGE_VOCABULARY = {
 
 _NEPALI_DEVANAGARI_HINTS = frozenset({
     "तपाईं", "तिमी", "मलाई", "मेरो", "हामी", "किन", "कसरी", "कस्तो", "कहाँ", "कहिले",
-    "छु", "छन्", "हुन्छ", "हुन्छ", "गर्नु", "गरेर", "भन्नु", "बोल्छु", "बोल्नु", "धन्यवाद", "कृपया", "नेपाली", "नेपालीमा",
+    "छु", "छन्", "छन्", "हुन्छ", "गर्नु", "गरेर", "भन्नु", "बोल्छु", "बोल्नु",
+    "हुन्", "यहाँ", "धेरै", "तथा", "ठाउँहरू", "चाहन्छु", "चाहन्छ", "प्रसिद्ध", "पर्यटकीय",
+    "नेपाल", "नेपालको", "काठमाडौं", "काठमाडौँ", "पोखरा", "चितवन", "पशुपतिनाथ", "स्वयम्भूनाथ",
+    "बौद्धनाथ", "स्तूप", "प्राकृतिक", "सुन्दरता", "निकै", "आकर्षक", "घुम्न", "गएँ", "गए", "भने",
+    "साथै", "जान", "हिमाल", "ताल", "दृश्यहरू", "सकिन्छ", "यात्रा", "लागि", "रमाइलो", "यादगार",
+    "अनुभव", "धन्यवाद", "कृपया", "नेपाली", "नेपालीमा",
 })
 
 _HINDI_DEVANAGARI_HINTS = frozenset({
     "आप", "तुम", "मुझे", "मेरा", "मेरी", "हम", "क्यों", "कैसे", "कहाँ", "कब",
     "हूँ", "हैं", "है", "करो", "करना", "बताओ", "धन्यवाद", "कृपया", "हिंदी",
+})
+
+# These forms are strong Nepali evidence even when Whisper labels the audio
+# as Hindi. Shared words such as "धन्यवाद", "कृपया", and "कहाँ" are excluded.
+_NEPALI_STRONG_DEVANAGARI_HINTS = frozenset({
+    "म", "तपाईं", "तिमी", "छ", "छन्", "छु", "हुनुहुन्छ", "गर्नुहुन्छ",
+    "काठमाडौं", "काठमाडौँ", "नेपालको", "चाहन्छु", "सकिन्छ", "यादगार",
+    "ठाउँहरू", "दृश्यहरू", "पर्यटकीय",
 })
 
 _TELUGU_ROMAN_STRONG_HINTS = frozenset({
@@ -410,6 +423,12 @@ def _devanagari_language(text: str, stt_hint: str = None, previous_language: str
     tokens = set(re.findall(r"[\u0900-\u097f]+", (text or "").lower()))
     nepali_hits = len(tokens.intersection(_NEPALI_DEVANAGARI_HINTS))
     hindi_hits = len(tokens.intersection(_HINDI_DEVANAGARI_HINTS))
+    strong_nepali_hits = len(tokens.intersection(_NEPALI_STRONG_DEVANAGARI_HINTS))
+
+    # Whisper often reports Hindi for Nepali speech because both use Devanagari.
+    # One distinctive Nepali form is enough to override that stale hint.
+    if strong_nepali_hits:
+        return "ne"
 
     # Require stronger Nepali evidence to classify as Nepali.
     if nepali_hits >= 2 and nepali_hits > hindi_hits:
