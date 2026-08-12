@@ -1525,6 +1525,8 @@ class Tarz:
                             {"response_completed": True},
                         )
 
+                # Let speaker echo decay before mic opens for the next turn.
+                time.sleep(0.20)
                 self.tracing.flush()
 
             except KeyboardInterrupt:

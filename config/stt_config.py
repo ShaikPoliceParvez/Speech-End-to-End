@@ -16,7 +16,7 @@ class STTSettings(BaseSettings):
     WHISPER_TEMPERATURES: Tuple[float, ...] = (0.0, 0.2)        # fallback temperatures tried when first decode has low confidence
     WHISPER_COMPRESSION_RATIO_THRESHOLD: float = 2.4            # rejects hallucinated text that compresses suspiciously well
     WHISPER_LOG_PROB_THRESHOLD: float = -1.0                    # rejects output where average word probability is too low
-    WHISPER_NO_SPEECH_THRESHOLD: float = 0.6                    # above this silence-score the audio is ignored as non-speech
+    WHISPER_NO_SPEECH_THRESHOLD: float = 0.70                   # above this silence-score the audio is ignored as non-speech; raised from 0.6
     WHISPER_LANGUAGE_CONFIDENCE_HIGH: float = 0.80              # auto-detected language is trusted above this probability
 
     # Script-biasing prompts — shown to the decoder before it starts to steer it to the right script

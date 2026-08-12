@@ -8,7 +8,7 @@ class AudioSettings(BaseSettings):
     CHANNELS: int = 1         # mono audio; speech models don't need stereo
 
     # Voice-activity detection — controls when recording starts and stops
-    VAD_SILENCE_THRESHOLD: float = 0.015   # mic energy below this = silence; raise if room is noisy
+    VAD_SILENCE_THRESHOLD: float = 0.025   # mic energy below this = silence; raised from 0.015 to sit above typical speaker echo (~0.02)
     VAD_SILENCE_DURATION: float = 0.5      # seconds of silence after speech before recording stops
     VAD_MIN_SPEECH_DURATION: float = 0.3   # clips shorter than this are dropped as accidental noise
     VAD_GRACE_PERIOD: float = 0.12         # extra buffer after silence so word endings aren't clipped

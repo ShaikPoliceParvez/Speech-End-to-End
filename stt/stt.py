@@ -261,9 +261,31 @@ class STT:
 
     @staticmethod
     def _is_suspicious_text(text):
-        """Detect empty or repeated-token output that is not useful speech."""
-        tokens = text.lower().split()
-        return not text or (len(tokens) >= 3 and len(set(tokens)) == 1)
+        """Detect empty, repeated-word, and syllable-loop hallucinations."""
+        if not text:
+            return True
+
+        tokens = text.split()
+
+        # Repeated identical words: "the the the the"
+        if len(tokens) >= 3 and len({t.lower() for t in tokens}) == 1:
+            return True
+
+        # Abnormally long single token — syllable-loop (e.g. "తెలుగుగుగుగుగుగు...")
+        if max((len(t) for t in tokens), default=0) > 40:
+            return True
+
+        # Character n-gram flood: one 2-4 char sequence fills >55% of the text
+        stripped = text.replace(" ", "")
+        if len(stripped) > 20:
+            for n in (2, 3, 4):
+                ngrams = [stripped[i:i + n] for i in range(len(stripped) - n + 1)]
+                if ngrams:
+                    top_count = max(ngrams.count(g) for g in set(ngrams))
+                    if top_count / len(ngrams) > 0.55:
+                        return True
+
+        return False
 
     def transcribe(
         self,
@@ -292,9 +314,11 @@ class STT:
             return self.empty_result()
 
         # Reject near-silent audio before invoking Whisper; it hallucinates
-        # common phrases ("Thank you", etc.) on ambient-noise recordings.
-        # Threshold lowered from 0.02 to 0.005 to support quieter microphones
-        if float(np.max(np.abs(audio))) < 0.005:
+        # common phrases on ambient-noise recordings.
+        # Use RMS (sustained energy) not peak so single-spike noise doesn't
+        # fool the check, and account for mic amplification (peak may be 0.01).
+        rms = float(np.sqrt(np.mean(np.square(audio))))
+        if rms < 0.007:
             return self.empty_result()
 
         # -- Language detection strategy -----------------------------------------------
@@ -334,9 +358,10 @@ class STT:
             language = detected_language  # Use probe result, not None
 
         # -- Whisper transcription with detected language -----------------------------------------------
-        # Use the detected language from probe instead of language=None for more reliable auto-detect
-        # If probe detected nothing, None is passed and Whisper does its internal auto-detect
-        transcription_language = language if language is not None else detected_language
+        # Always prefer the probe-detected language for transcription so a
+        # stale English hint doesn't force a Telugu/Hindi decode down the wrong
+        # path when the user switches language mid-conversation.
+        transcription_language = detected_language if detected_language is not None else language
 
         transcription_start = time.perf_counter()
         segments, info = self._decode(audio, transcription_language, final)
@@ -434,6 +459,10 @@ class STT:
                 first_segment_ms = retry_first_segment_ms
 
         transcription_latency_ms = round((time.perf_counter() - transcription_start) * 1000, 2)
+
+        # Final hallucination guard applied after first-pass AND after any retry.
+        if self._is_suspicious_text(text) or text.lower().rstrip(".,!?…") in _HALLUCINATION_PHRASES:
+            return self.empty_result()
 
         detected_language = getattr(info, "language", DEFAULT_LANGUAGE)
         if detected_language not in STT_ALLOWED_LANGUAGES:
