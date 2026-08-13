@@ -9,7 +9,7 @@ class LLMSettings(BaseSettings):
     LLM_ENGLISH_MODEL: str = "qwen2.5:1.5b"    # lighter/faster model for English-only turns
     LLM_INDIC_MODEL: str = "gemma3:4b"          # used for Hindi, Telugu, Malayalam, Nepali turns
     LLM_MULTILINGUAL_MODEL: str = "gemma3:4b"   # used when language switches mid-conversation
-    LLM_CAMERA_MODEL: str = "gemma3:4b"         # must support vision; used for photo/image turns
+    LLM_CAMERA_MODEL: str = "gemma3:4b"         # vision-capable model used for uploaded images
     LLM_AVAILABLE_MODELS: str = "qwen2.5:1.5b,mashriram/sarvam-1,gemma3:4b,qwen2.5:3b,gemma2:2b,gemma2:2b-instruct-q2_K"  # reference list; not loaded automatically
 
     # Response length — lower = faster reply, shorter answer

@@ -181,7 +181,7 @@ class LLM:
 
     @staticmethod
     def _select_model(language, vision_requested=False):
-        # Vision/camera operations always use the camera-capable model.
+        # Uploaded image operations use the configured vision-capable model.
         if vision_requested:
             return LLM_CAMERA_MODEL or LLM_MULTILINGUAL_MODEL or LLM_MODEL
         # English always uses the lighter model.
@@ -415,7 +415,7 @@ class LLM:
             elif lang == "te":
                 assistant = "క్షమించండి, ప్రస్తుత మోడల్ కెమెరా లేదా చిత్రాలను చూడలేను."
             else:
-                assistant = "Sorry, the current model cannot see camera images."
+                assistant = "Sorry, the current model cannot analyze uploaded images."
 
             self.memory.add_assistant(assistant)
             self.last_metrics = {
@@ -634,6 +634,10 @@ class LLM:
         if social_turn:
             # Social turns do not need historical context; keep prompts small for faster TTFT.
             include_history = False
+        if vision_requested:
+            # Image/OCR turns already carry the media context; old chat history
+            # only increases prompt latency and can crowd out document text.
+            include_history = False
 
         if include_history:
             window = max(0, int(LLM_HISTORY_TURNS)) * 2
@@ -664,18 +668,22 @@ class LLM:
         # If vision is requested
         if image is not None:
 
-            if isinstance(image, Image.Image):
-                # Ollama accepts bytes/path; convert in-memory PIL image to PNG bytes.
-                buffer = BytesIO()
-                image.save(buffer, format="PNG")
-                image = buffer.getvalue()
-            elif isinstance(image, Path):
-                image = str(image)
+            images = image if isinstance(image, (list, tuple)) else [image]
+            normalized_images = []
+            for image_item in images:
+                if isinstance(image_item, Image.Image):
+                    buffer = BytesIO()
+                    image_item.save(buffer, format="PNG")
+                    normalized_images.append(buffer.getvalue())
+                elif isinstance(image_item, Path):
+                    normalized_images.append(str(image_item))
+                else:
+                    normalized_images.append(image_item)
 
             messages[-1] = {
                 "role": "user",
                 "content": prompt,
-                "images": [image],      # image path or bytes
+                "images": normalized_images,
             }
 
         assistant = ""
@@ -695,6 +703,14 @@ class LLM:
             num_predict = min(LLM_ROUTINE_MAX_TOKENS, LLM_MAX_TOKENS)
         else:
             num_predict = min(256, LLM_MAX_TOKENS)
+
+        # Uploaded OCR text can make an Indic prompt exceed its smaller context
+        # window. Vision/document turns use the larger configured context.
+        context_size = (
+            LLM_NUM_CTX
+            if vision_requested
+            else LLM_INDIC_NUM_CTX if selected_model == LLM_INDIC_MODEL else LLM_NUM_CTX
+        )
 
         generation = (
             self.tracer.start_generation(
@@ -721,7 +737,7 @@ class LLM:
                     "top_k": LLM_TOP_K,
                     "top_p": LLM_TOP_P,
                     "repeat_penalty": LLM_REPEAT_PENALTY,
-                    "num_ctx": LLM_INDIC_NUM_CTX if selected_model == LLM_INDIC_MODEL else LLM_NUM_CTX,
+                    "num_ctx": context_size,
                 },
             )
 
@@ -829,7 +845,7 @@ class LLM:
                             "top_k": LLM_TOP_K,
                             "top_p": LLM_TOP_P,
                             "repeat_penalty": LLM_REPEAT_PENALTY,
-                            "num_ctx": LLM_INDIC_NUM_CTX if selected_model == LLM_INDIC_MODEL else LLM_NUM_CTX,
+                            "num_ctx": context_size,
                         },
                     )
                     retry_text = "".join(

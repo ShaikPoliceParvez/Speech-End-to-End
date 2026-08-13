@@ -29,7 +29,7 @@
 # 2. Intent Routing: Route to GENERAL, SEARCH (web), VISION (photo), OCR (text recognition)
 # 3. Task Detection: Match vocabulary in TASK_KEYWORDS dict to identify task context
 # 4. Memory Retrieval: Load conversation history (persona + prior turns)
-# 5. Optional Vision: Capture camera image if VISION/OCR intent
+# 5. Optional Vision: Process uploaded image/PDF media
 # 6. LLM → TTS Pipeline: 
 #    - Producer: Stream LLM tokens into queue (background thread)
 #    - Sentence buffer: Group tokens by punctuation/word count
@@ -80,9 +80,11 @@ from stt.stt import STT
 from core.router import Router
 from llm.llm import LLM, sentence_stream
 from tts.tts_router import TTSRouter
-from camera.camera import Camera
 from core.language import detect_dominant_language, normalize_text, detect_script
 from core.tracing import LangfuseTracer
+from services.vision import VisionService
+from ui.media_chooser import MediaChooser
+from pathlib import Path
 
 
 class Tarz:
@@ -132,7 +134,6 @@ class Tarz:
         "news": {"news", "headlines", "समाचार", "వార్తలు", "समाचार", "samachar", "أخبار"},
         "coding": {"code", "coding", "program", "python", "bug", "debug", "fix", "script"},
         "math": {"math", "calculate", "equation", "sum", "multiply", "divide", "गणना", "हिसाब", "hisab", "లెక్క"},
-        "camera": {"camera", "photo", "image", "picture", "ocr", "read this"},
         "translation": {"translate", "translation", "अनुवाद", "అనువాదం", "अनुवाद", "anuwad", "ترجمة"},
     }
 
@@ -159,7 +160,7 @@ class Tarz:
         - Microphone (audio input with VAD noise gate)
         - STT engine (Whisper + IndicConformer for Indic languages)
         - Router (intent classifier: GENERAL, SEARCH, VISION, OCR)
-        - Camera (optional vision input for photo/image analysis)
+        - Upload media (optional image/PDF input for analysis)
         - LLM (language model with conversation memory)
         - TTS router (multi-backend: SuperTonic for en/hi, Piper for te/ml/ar)
         Optionally runs LLM warmup on startup if configured.
@@ -171,17 +172,26 @@ class Tarz:
         self.mic = Microphone()
         self.stt = STT()
         self.router = Router()
-        self.camera = Camera()
+        self.vision = VisionService()
+        self.media_chooser = MediaChooser()
+        print("Loading LLM...", flush=True)
         self.llm = LLM(model=config.LLM_MODEL, tracer=self.tracing)
         if config.LLM_WARMUP_ON_STARTUP:
             self.llm.warmup()
+        print("✓ LLM Loaded", flush=True)
+        print("Loading OCR...", flush=True)
+        self.vision.ocr.initialize()
+        print("✓ OCR Loaded", flush=True)
+        print("Loading TTS...", flush=True)
         self.tts = TTSRouter(on_event=self._on_event)
+        print("✓ TTS Loaded", flush=True)
         self.current_task = None
         self.tracing.set_model_startup_metrics(
             stt=self.stt.model_startup_metrics,
             llm=self.llm.measure_model_startup(),
             tts=self.tts.model_startup_metrics,
         )
+        print("\nTarz Ready\n", flush=True)
 
     def _on_event(self, name, data):
         if config.DEBUG:
@@ -332,7 +342,6 @@ class Tarz:
             "poem": {"poem", "poetry", "shayari", "कविता", "शायरी", "పద్య", "కవిత", "قصيدة"},
             "weather": {"weather", "temperature", "forecast", "मौसम", "వాతావరణం", "കാലാവസ്ഥ", "الطقس"},
             "news": {"news", "headlines", "समाचार", "వార్తలు", "വാർത്ത", "أخبار"},
-            "camera": {"camera", "photo", "image", "picture", "कैमरा", "కెమెరా", "ക്യാമറ", "كاميرا"},
             "translation": {"translate", "translation", "अनुवाद", "అనువాదం", "വിവർത്തനം", "ترجمة"},
             "math": {"calculate", "math", "equation", "sum", "गणना", "లెక్క", "കണക്കു", "حساب"},
             "coding": {"code", "coding", "program", "python", "bug", "कोड", "కోడ్", "കോഡ്", "كود"},
@@ -396,7 +405,6 @@ class Tarz:
             "news": "news",
             "coding": "coding",
             "math": "math",
-            "camera": "camera",
             "translation": "translation",
         }
         # Inherit task category if in task context and no explicit category detected.
@@ -405,7 +413,7 @@ class Tarz:
 
         # Terse follow-ups (≤2 words) on known tasks are better labeled as "answer" than "generic".
         # "Flights" alone should get "I'll search for flights" (answer) not "I can help" (generic).
-        if category == "generic" and len(text.split()) <= 2 and current_task in {"travel", "coding", "math", "news", "weather", "camera", "translation"}:
+        if category == "generic" and len(text.split()) <= 2 and current_task in {"travel", "coding", "math", "news", "weather", "translation"}:
             category = "answer"
 
         # Questions with question marks or query words (how, what, where) → "answer" category.
@@ -476,7 +484,7 @@ class Tarz:
         Task detection enables task-lock mode: follow-ups within the same task stay in context.
         
         Algorithm:
-        1. If router detected VISION or OCR intent → task="camera" (hardcoded override)
+        1. OCR wording is routed to the upload-based OCR task
         2. Extract tokens from text using Unicode regex (English/Hindi/Telugu/Malayalam/Arabic)
         3. Iterate through TASK_KEYWORDS dict, checking if any task vocabulary matches tokens
         4. First task with keyword match is returned; order matters (story checked before joke, etc)
@@ -512,10 +520,6 @@ class Tarz:
             }
         ):
             return None
-
-        # VISION/OCR intents detected by router → camera task (hardcoded, no vocabulary check needed).
-        if intent in ("VISION", "OCR"):
-            return "camera"
 
         # Extract tokens (words) using Unicode regex to support all 5 languages in one pass.
         # Regex ranges: [a-zA-Z] = English, [\u0900-\u097f] = Devanagari (Hindi), 
@@ -926,6 +930,7 @@ class Tarz:
         input_mode=None,
         request_start=None,
         pipeline_metrics=None,
+        media_source=None,
     ):
         """
         High-level process wrapper: Validates input and optionally creates a tracing turn.
@@ -963,6 +968,7 @@ class Tarz:
                         input_mode,
                         request_start,
                         pipeline_metrics,
+                        media_source,
                     )
         else:
             self._process(
@@ -973,12 +979,23 @@ class Tarz:
                 input_mode,
                 request_start,
                 pipeline_metrics,
+                media_source,
             )
 
         if owns_turn:
             self.tracing.flush()
 
-    def _process(self, text, stt_language_hint, stt_language_confidence, turn, input_mode, request_start, pipeline_metrics):
+    def _process(
+        self,
+        text,
+        stt_language_hint,
+        stt_language_confidence,
+        turn,
+        input_mode,
+        request_start,
+        pipeline_metrics,
+        media_source=None,
+    ):
         """
         Core orchestration: Complete Tarz pipeline from user input to TTS playback.
         Implements all 7 processing stages with tracing at each step.
@@ -1000,7 +1017,8 @@ class Tarz:
         """
 
         print(f"\nYou: {text}")
-        print(f"[DEBUG APP] Input text: '{text}' | STT hint: {stt_language_hint} | Confidence: {stt_language_confidence}")
+        if config.DEBUG:
+            print(f"[DEBUG APP] Input text: '{text}' | STT hint: {stt_language_hint} | Confidence: {stt_language_confidence}")
 
         # ── 1. Language detection & script classification ─────────────
         language_start = self.tracing.now()
@@ -1013,16 +1031,19 @@ class Tarz:
             },
         ) as classification:
             script = detect_script(text)
-            print(f"[DEBUG APP] Script detected: {script}")
+            if config.DEBUG:
+                print(f"[DEBUG APP] Script detected: {script}")
             language = detect_dominant_language(
                 text,
                 stt_hint=stt_language_hint,
                 stt_confidence=stt_language_confidence,
                 previous_language=self.llm.memory.get_language(),
             )
-            print(f"[DEBUG APP] Language detected: {language}")
+            if config.DEBUG:
+                print(f"[DEBUG APP] Language detected: {language}")
             normalized_text = normalize_text(text, language)
-            print(f"[DEBUG APP] After normalization: '{normalized_text}' (changed: {normalized_text != text})")
+            if config.DEBUG:
+                print(f"[DEBUG APP] After normalization: '{normalized_text}' (changed: {normalized_text != text})")
             self.llm.memory.set_input_script(script)
             self.tracing.update_step(
                 classification,
@@ -1099,25 +1120,44 @@ class Tarz:
 
         memory_latency_ms = self.tracing.elapsed_ms(memory_start)
 
-        # ── 4. Optional camera capture for vision intents ────────────
+        # ── 4. Optional uploaded media for vision intents ───────────
         image = None
-        vision_requested = intent in ("VISION", "OCR")
-        if vision_requested and self.llm.supports_vision():
-            camera_start = self.tracing.now()
+        vision_requested = bool(media_source)
+        sources = media_source if isinstance(media_source, (list, tuple)) else [media_source]
+        ocr_requested = intent in ("OCR", "OCR_VISION") or any(
+            isinstance(source, (str, Path)) and Path(source).suffix.lower() == ".pdf"
+            for source in sources
+        )
+        extracted_ocr = ""
+        if media_source and self.llm.supports_vision():
+            media_start = self.tracing.now()
             with self.tracing.start_step(
-                "Camera",
-                metadata={"image_included_in_trace": False},
+                "Media",
+                metadata={"source": str(media_source), "image_included_in_trace": False},
                 as_type="tool",
-            ) as capture:
-                print("Opening camera...")
-                image, image_size = self.camera.capture()
-                self.tracing.update_step(
-                    capture,
-                    output={"captured": True, "image_size": image_size},
-                    metadata={"latency_ms": self.tracing.elapsed_ms(camera_start)},
+            ) as media_step:
+                print("Analyzing uploaded media...", flush=True)
+                multimodal_inputs = self.vision.prepare_many(
+                    list(sources),
+                    use_ocr=ocr_requested,
+                    ocr_lang=language,
                 )
-        elif vision_requested:
-            print("Camera analysis is unavailable with the configured text-only model.")
+                image = [item.image for item in multimodal_inputs]
+                extracted_ocr = "\n\n".join(
+                    item.ocr_text for item in multimodal_inputs if item.ocr_text
+                )
+                self.tracing.update_step(
+                    media_step,
+                    output={
+                        "source": [item.source for item in multimodal_inputs],
+                        "pages": sum(item.pages for item in multimodal_inputs),
+                        "media_count": len(multimodal_inputs),
+                        "ocr_chars": len(extracted_ocr),
+                    },
+                    metadata={"latency_ms": self.tracing.elapsed_ms(media_start)},
+                )
+        elif media_source:
+            print("Uploaded media analysis is unavailable with the configured text-only model.")
 
         # ── 5. Build filler phrase and effective LLM prompt ──────────
         context_preface = None
@@ -1132,6 +1172,11 @@ class Tarz:
             detected_task=detected_task,
             language=language,
         )
+        if extracted_ocr:
+            effective_prompt = (
+                f"{effective_prompt}\n\nExtracted text from the uploaded document:\n"
+                f"{extracted_ocr}"
+            )
         # After a spoken preface, prefer natural punctuation boundaries instead
         # of ultra-early single-word chunks so continuation sounds smoother.
         if config.DEBUG:
@@ -1241,6 +1286,18 @@ class Tarz:
                     if self.tts.is_interrupted():
                         break
                     token_queue.put(token)
+            except Exception as error:
+                if config.DEBUG:
+                    print(f"\n[LLM ERROR] {error}")
+                error_replies = {
+                    "en": "I could not finish analyzing that upload. Please try a shorter question.",
+                    "hi": "मैं उस अपलोड का विश्लेषण पूरा नहीं कर पाया। कृपया छोटा सवाल पूछें।",
+                    "ne": "मैले त्यो अपलोडको विश्लेषण पूरा गर्न सकिनँ। कृपया छोटो प्रश्न सोध्नुहोस्।",
+                    "te": "ఆ అప్‌లోడ్‌ను పూర్తిగా విశ్లేషించలేకపోయాను. దయచేసి చిన్న ప్రశ్న అడగండి.",
+                    "ml": "ആ അപ്‌ലോഡ് പൂർണ്ണമായി വിശകലനം ചെയ്യാൻ കഴിഞ്ഞില്ല. ദയവായി ചെറിയ ചോദ്യം ചോദിക്കുക.",
+                    "ar": "لم أتمكن من تحليل الملف المرفوع بالكامل. يرجى طرح سؤال أقصر.",
+                }
+                token_queue.put(error_replies.get(language, error_replies["en"]))
             finally:
                 token_queue.put(stream_done)
 
@@ -1445,6 +1502,7 @@ class Tarz:
         Exits when user says "back to menu" to return to mode selection screen.
         """
         print("Say 'back to menu' to choose a different mode.")
+        pending_media_source = None
 
         while True:
             # Main voice interaction loop with exception handling for keyboard interrupt.
@@ -1515,6 +1573,21 @@ class Tarz:
                                 metadata={"engine": _engine},
                             )
 
+                        upload_request = result["text"].strip().lower() in {
+                            "upload", "upload file", "upload image", "upload document",
+                            "attach file", "attach an image", "add image",
+                        }
+                        if upload_request:
+                            pending_media_source = self.media_chooser.choose()
+                            if pending_media_source:
+                                print("Uploaded media is ready. Ask your question.")
+                            self.tracing.record_event(
+                                turn,
+                                "Media Selection Completed",
+                                {"media_selected": bool(pending_media_source)},
+                            )
+                            continue
+
                         if self._return_to_menu_requested(result["text"]):
                             print("Returning to mode selection...")
                             self.tracing.record_event(turn, "Conversation Ended", {"returned_to_menu": True})
@@ -1532,7 +1605,9 @@ class Tarz:
                                 "vad": vad_metrics,
                                 "stt_latency_ms": result["latency_ms"],
                             },
+                            media_source=pending_media_source,
                         )
+                        pending_media_source = None
 
                         self.tracing.record_event(
                             turn,
@@ -1564,7 +1639,22 @@ class Tarz:
         """
         while True:
             # Continuously prompt for user input.
-            text = input("\nYou (/menu to change mode): ")
+            text = input("\nYou (/menu, 1=upload): ")
+
+            media_source = None
+            if text.strip().lower() in {"1", "/upload"}:
+                media_source = self.media_chooser.choose()
+                if not media_source:
+                    continue
+                text = input("Question about the uploaded media: ").strip()
+                if not text:
+                    continue
+
+            if text.lower().startswith(("/image ", "/pdf ", "/media ")):
+                command, _, remainder = text.partition(" ")
+                media_source, separator, prompt = remainder.partition("|")
+                media_source = media_source.strip()
+                text = prompt.strip() if separator else "Describe or read this file."
 
             # Check if user requested menu exit.
             if self._return_to_menu_requested(text):
@@ -1572,7 +1662,7 @@ class Tarz:
                 return
 
             # Process text input (no language hint, no STT metrics).
-            self.process(text)
+            self.process(text, media_source=media_source or None)
 
 
 if __name__ == "__main__":

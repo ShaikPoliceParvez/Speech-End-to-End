@@ -6,11 +6,6 @@ class AppSettings(BaseSettings):
 
     DEBUG: bool = False  # set True to print all internal events to the console
 
-    # Camera
-    CAMERA_INDEX: int = 0              # 0 = first/default camera; change if you have multiple
-    CAPTURE_SAVE_IMAGES: bool = True   # save every captured photo to the captures/ folder
-    CAPTURE_MAX_FILES: int = 20        # oldest file is deleted once this limit is reached
-
     # Conversation memory
     MAX_HISTORY: int = 10  # how many past turns the assistant remembers per session
 
