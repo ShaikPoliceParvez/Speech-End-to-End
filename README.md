@@ -236,7 +236,7 @@ Avatar_base/
 All settings live in `config/` as [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) classes. Override any value via environment variable or `.env` file:
 
 ```
-LLM_MODEL=qwen2.5:3b
+LLM_MODEL=Gemma2.5:1.5b
 WHISPER_SIZE=medium
 VOICE=M1
 TTS_SPEED=0.95
